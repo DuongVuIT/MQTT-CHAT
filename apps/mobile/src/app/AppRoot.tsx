@@ -9,7 +9,26 @@ import { ChatScreen } from '../screens/ChatScreen';
 type Route =
   | { screen: 'picker' }
   | { screen: 'list' }
-  | { screen: 'chat'; conversationId: string; title: string };
+  | {
+      screen: 'chat';
+      conversationId: string;
+      title: string;
+      subtitle: string | null;
+    };
+
+/** Peer-relative display title: A sees B's name and vice versa. */
+function conversationTitle(
+  conv: ReturnType<typeof useChatSession>['conversations'][number] | undefined,
+  users: Awaited<ReturnType<typeof api.listUsers>>,
+  identityUserId: string | null,
+): string {
+  if (!conv) return 'Direct chat';
+  if (conv.type === 'GROUP') return conv.title ?? 'Group';
+  const peerId = conv.members.find(m => m.userId !== identityUserId)?.userId;
+  return (
+    users.find(u => u.id === peerId)?.displayName ?? peerId ?? 'Direct chat'
+  );
+}
 
 export function AppRoot() {
   const [users, setUsers] = useState<Awaited<ReturnType<typeof api.listUsers>>>(
@@ -75,13 +94,19 @@ export function AppRoot() {
         conversations={session.conversations}
         presence={session.presence}
         status={session.status}
+        users={users}
+        identityUserId={identity?.userId ?? null}
         onOpen={conversationId => {
           const conv = session.conversations.find(c => c.id === conversationId);
           void session.openConversation(conversationId);
           setRoute({
             screen: 'chat',
             conversationId,
-            title: conv?.title ?? 'Direct chat',
+            title: conversationTitle(conv, users, identity?.userId ?? null),
+            subtitle:
+              conv && conv.type === 'GROUP'
+                ? `${conv.members?.length ?? 0} members`
+                : null,
           });
         }}
       />
@@ -91,9 +116,11 @@ export function AppRoot() {
   return (
     <ChatScreen
       title={route.title}
+      subtitle={route.subtitle ?? undefined}
       messages={session.messagesByConv[route.conversationId] ?? []}
       pending={session.pendingListFor(route.conversationId)}
       typingUsers={session.typingByConv[route.conversationId] ?? []}
+      identityUserId={identity?.userId ?? null}
       onSend={content => {
         void session.sendMessage(route.conversationId, content);
       }}

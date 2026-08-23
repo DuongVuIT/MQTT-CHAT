@@ -1,22 +1,42 @@
 import React from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { ApiConversation } from '../lib/api';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { ApiConversation, ApiUser } from '../lib/api';
 import type { ConnectionStatus } from '@mqtt-chat/realtime-core';
 
+/**
+ * Conversation list — safe-area header, peer-relative DIRECT labels
+ * (A sees B's name, B sees A's), tri-state presence dot.
+ */
 export function ConversationListScreen({
   conversations,
   presence,
   status,
+  users,
+  identityUserId,
   onOpen,
 }: {
   conversations: ApiConversation[];
   presence: Record<string, boolean>;
   status: ConnectionStatus;
+  users: ApiUser[];
+  identityUserId: string | null;
   onOpen: (conversationId: string) => void;
 }) {
+  const insets = useSafeAreaInsets();
+
+  const labelFor = (c: ApiConversation): string => {
+    if (c.type === 'GROUP') return c.title ?? 'Group';
+    const members = c.members ?? [];
+    const peerId = members.find(m => m.userId !== identityUserId)?.userId;
+    const peer = users.find(u => u.id === peerId);
+    // Never a generic "Direct chat" when any peer information exists.
+    return peer?.displayName ?? peerId ?? 'Direct chat';
+  };
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.headerTitle}>Conversations</Text>
         <Text
           style={[
@@ -30,24 +50,26 @@ export function ConversationListScreen({
       <FlatList
         data={conversations}
         keyExtractor={c => c.id}
+        contentContainerStyle={{ paddingBottom: insets.bottom }}
         renderItem={({ item }) => {
-          const other = item.members.find(
-            m => m.userId !== undefined && m.role !== undefined,
-          );
-          const online = item.members.some(m => presence[m.userId] === true);
+          const peerId =
+            item.members.find(m => m.userId !== identityUserId)?.userId ??
+            item.members[0]?.userId;
+          // Tri-state: true=online, false=offline, undefined=unknown.
+          const online = peerId ? presence[peerId] : undefined;
           return (
             <Pressable style={styles.item} onPress={() => onOpen(item.id)}>
               <View style={styles.avatarRow}>
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>
-                    {(item.title ?? other?.userId ?? '#')
-                      .slice(0, 1)
-                      .toUpperCase()}
+                    {labelFor(item).slice(0, 1).toUpperCase()}
                   </Text>
-                  {online && <View style={styles.dot} />}
+                  {online === true && <View style={styles.dot} />}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.name}>{item.title ?? 'Direct chat'}</Text>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {labelFor(item)}
+                  </Text>
                   <Text style={styles.preview} numberOfLines={1}>
                     {item.lastMessagePreview ?? 'No messages yet'}
                   </Text>
@@ -70,7 +92,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
   },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
   badge: {

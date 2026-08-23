@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChatRealtimeClient,
+  normalizeMessage,
   type ConnectionStatus,
   type RealtimeEvent,
 } from '@mqtt-chat/realtime-core';
@@ -64,7 +65,7 @@ export function useChatSession(identity: Identity | null) {
         setUsers(us);
         setConversations(convs);
         const ids = [
-          ...new Set(convs.flatMap(c => c.members.map(m => m.userId))),
+          ...new Set(convs.flatMap(c => (c.members ?? []).map(m => m.userId))),
         ];
         if (ids.length > 0) {
           const snap = await api.getPresence(ids);
@@ -113,7 +114,11 @@ export function useChatSession(identity: Identity | null) {
       const data = ev.data ?? {};
       switch (ev.eventType) {
         case 'message.created': {
-          const m = data as unknown as ApiMessage;
+          // Canonical normalization at the boundary — guarantees the UI
+          // message invariants (reactions array, null-safe dates, senderName).
+          // NEVER cast raw event data to the UI model.
+          const m = normalizeMessage(data);
+          if (!m.id || !m.conversationId) break; // malformed — ignore
           store.reconcile(m.clientMessageId, m);
           setMessagesByConv(prev => {
             const list = prev[m.conversationId] ?? [];
@@ -201,7 +206,7 @@ export function useChatSession(identity: Identity | null) {
     });
 
     return () => {
-      client.disconnect();
+      void client.disconnect();
       clientRef.current = null;
     };
   }, [identity, refreshPending]);

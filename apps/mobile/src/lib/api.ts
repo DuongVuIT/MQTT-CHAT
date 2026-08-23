@@ -39,7 +39,7 @@ export interface ApiMessage {
   senderType: 'USER' | 'BOT' | 'SYSTEM';
   senderName: string;
   sequence: number;
-  type: 'TEXT' | 'IMAGE' | 'FILE';
+  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'VOICE' | 'SYSTEM';
   content: string;
   replyToId: string | null;
   metadata: unknown;
