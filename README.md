@@ -229,3 +229,4 @@ See `docs/`: architecture, mqtt-topics, message-flow, bot-system, development.
 
 Coding agents must read `AGENTS.md` first; detailed rules in `.agent/rules/`, workflows in `.agent/skills/`.
 # MQTT-CHAT
+# MQTT-CHAT
