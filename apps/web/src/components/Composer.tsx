@@ -8,20 +8,62 @@ import { useChatStore } from "@/store/chat-store";
 const TYPING_DEBOUNCE_MS = 2000;
 /** If no canonical message.created arrives within this window, mark failed. */
 const SEND_TIMEOUT_MS = 10_000;
+/** Queued-while-offline sends get a bounded but more patient window. */
+const QUEUED_SEND_TIMEOUT_MS = 30_000;
 
 /** Arm the reconciliation timeout for an optimistic send. */
-function armSendTimeout(clientMessageId: string): void {
+function armSendTimeout(clientMessageId: string, timeoutMs: number = SEND_TIMEOUT_MS): void {
   setTimeout(() => {
-    const stillPending = useChatStore
+    const entry = useChatStore
       .getState()
-      .pendingMessages.some((p) => p.clientMessageId === clientMessageId && p.status === "pending");
-    if (stillPending) useChatStore.getState().markPendingFailed(clientMessageId);
-  }, SEND_TIMEOUT_MS);
+      .pendingMessages.find((p) => p.clientMessageId === clientMessageId);
+    // Still unresolved (queued or published-but-unacked) → FAILED. The same
+    // clientMessageId stays retryable, so nothing is ever silently dropped.
+    if (entry && entry.status !== "failed") {
+      useChatStore.getState().markPendingFailed(clientMessageId);
+    }
+  }, timeoutMs);
+}
+
+/** True when the realtime transport is currently connected. */
+function isConnected(): boolean {
+  return useChatStore.getState().connectionState === "connected";
 }
 
 /**
- * Retry a failed pending message. Re-publishes the SAME clientMessageId —
- * chat-worker dedupes by it, so retries are idempotent.
+ * Publish a send command, or QUEUE it while offline. Queued sends are
+ * flushed with the SAME clientMessageId on reconnect (see chat page) —
+ * never an uncaught rejection, never a lost message.
+ */
+export function publishOrQueueSend(body: {
+  conversationId: string;
+  clientMessageId: string;
+  content: string;
+  type: string;
+  replyToId: string | null;
+  metadata: unknown;
+  /** Optimistic bubble text when it differs from the message content (uploads). */
+  pendingContent?: string;
+}): void {
+  const store = useChatStore.getState();
+  store.addPending({
+    clientMessageId: body.clientMessageId,
+    conversationId: body.conversationId,
+    content: body.pendingContent ?? body.content,
+    replyToId: body.replyToId,
+    status: isConnected() ? "pending" : "queued",
+  });
+  if (isConnected()) {
+    getRealtimeService().publishCommand("message.send", { ...body });
+    armSendTimeout(body.clientMessageId);
+  } else {
+    armSendTimeout(body.clientMessageId, QUEUED_SEND_TIMEOUT_MS);
+  }
+}
+
+/**
+ * Retry a failed/queued pending message. Re-publishes the SAME
+ * clientMessageId — chat-worker dedupes by it, so retries are idempotent.
  * Exported for the retry button rendered next to failed bubbles.
  */
 export function retryPendingMessage(clientMessageId: string): void {
@@ -67,12 +109,6 @@ export function Composer({ conversationId }: { conversationId: string }) {
     }, TYPING_DEBOUNCE_MS);
   };
 
-  /** Publish a send command and arm the reconciliation timeout. */
-  const publishSend = (clientMessageId: string, body: Record<string, unknown>): void => {
-    getRealtimeService().publishCommand("message.send", { clientMessageId, ...body });
-    armSendTimeout(clientMessageId);
-  };
-
   const send = (): void => {
     const content = text.trim();
     if (!content || uploading) return;
@@ -81,16 +117,10 @@ export function Composer({ conversationId }: { conversationId: string }) {
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     getRealtimeService().publishCommand("typing.set", { conversationId, isTyping: false }, 0);
 
-    const clientMessageId = crypto.randomUUID();
-    useChatStore.getState().addPending({
-      clientMessageId,
+    // Offline → QUEUED (flushed on reconnect); online → published now.
+    publishOrQueueSend({
       conversationId,
-      content,
-      replyToId: null,
-      status: "pending",
-    });
-    publishSend(clientMessageId, {
-      conversationId,
+      clientMessageId: crypto.randomUUID(),
       content,
       type: "TEXT",
       replyToId: null,
@@ -102,33 +132,21 @@ export function Composer({ conversationId }: { conversationId: string }) {
     if (!file) return;
     setUploading(true);
     try {
-      const { uploadUrl, key } = await api.presignUpload({
-        conversationId,
-        filename: file.name,
-        contentType: file.type || "application/octet-stream",
-        sizeBytes: file.size,
-      });
-      const putRes = await fetch(uploadUrl, { method: "PUT", body: file });
-      if (!putRes.ok) throw new Error(`Upload failed (${putRes.status})`);
-      await api.completeUpload({ conversationId, key });
+      // Same-origin multipart upload — the API streams to object storage
+      // server-side and returns the durable storage key.
+      const { key } = await api.uploadFile(file, conversationId);
 
       const isImage = file.type.startsWith("image/");
-      const clientMessageId = crypto.randomUUID();
-      useChatStore.getState().addPending({
-        clientMessageId,
+      publishOrQueueSend({
         conversationId,
-        content: `📎 ${file.name}`,
-        replyToId: null,
-        status: "pending",
-      });
-      publishSend(clientMessageId, {
-        conversationId,
+        clientMessageId: crypto.randomUUID(),
         content: "",
         type: isImage ? "IMAGE" : "FILE",
         replyToId: null,
+        pendingContent: `📎 ${file.name}`,
         metadata: {
           // Durable storage key ONLY — never a signed URL or dev host.
-          // Recipients resolve it at read time via GET /uploads/view.
+          // Recipients resolve it at read time via GET /media.
           storageKey: key,
           filename: file.name,
           mimeType: file.type,

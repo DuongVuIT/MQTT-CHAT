@@ -9,7 +9,7 @@ const QUICK_EMOJIS = ["👍", "❤️", "😂", "🎉"] as const;
 
 interface PendingProps {
   content: string;
-  status: "pending" | "failed";
+  status: "queued" | "pending" | "failed";
   clientMessageId: string;
 }
 
@@ -58,7 +58,11 @@ export const MessageBubble = memo(function MessageBubble({
         >
           <p className="whitespace-pre-wrap break-words">{pending.content}</p>
           <p className="mt-0.5 text-right text-[10px] opacity-70">
-            {pending.status === "pending" ? "Sending…" : "Failed"}
+            {pending.status === "queued"
+              ? "Queued…"
+              : pending.status === "pending"
+                ? "Sending…"
+                : "Failed"}
             {pending.status === "failed" && (
               <button
                 type="button"

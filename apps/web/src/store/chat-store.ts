@@ -12,7 +12,8 @@ export interface PendingMessage {
   conversationId: string;
   content: string;
   replyToId: string | null;
-  status: "pending" | "failed";
+  /** queued = offline, waiting for reconnect; pending = published, awaiting ack. */
+  status: "queued" | "pending" | "failed";
 }
 
 export interface ChatState {
@@ -30,6 +31,12 @@ export interface ChatState {
   error: string | null;
 
   setIdentity: (identity: ChatState["identity"]) => void;
+  /**
+   * Identity switch hygiene: drop ALL identity-scoped transient state
+   * (conversations, messages, pending sends, typing, presence) so nothing
+   * leaks from the previous session into the new one.
+   */
+  resetTransient: () => void;
   setUsers: (users: ApiUser[]) => void;
   setConversations: (conversations: ApiConversation[]) => void;
   /** Insert or replace a conversation (canonical conversation.created / refetch). */
@@ -82,6 +89,18 @@ export const useChatStore = create<ChatState>((set) => ({
   error: null,
 
   setIdentity: (identity) => set({ identity }),
+  resetTransient: () =>
+    set({
+      conversations: [],
+      activeConversationId: null,
+      messagesByConversation: {},
+      pendingMessages: [],
+      typingUsers: {},
+      presence: {},
+      hasMoreHistory: {},
+      loadingHistory: false,
+      error: null,
+    }),
   setUsers: (users) => set({ users }),
   setConversations: (conversations) => set({ conversations }),
   upsertConversation: (conversation) =>
@@ -201,12 +220,15 @@ export const useChatStore = create<ChatState>((set) => ({
           cid,
           list.map((m) => {
             if (m.id !== messageId) return m;
-            const existing = m.reactions.find((r) => r.emoji === emoji && r.userId === userId);
+            // Defensive: reactions is contractually an array, but a malformed
+            // row must not crash the whole store update.
+            const reactions = m.reactions ?? [];
+            const existing = reactions.find((r) => r.emoji === emoji && r.userId === userId);
             return {
               ...m,
               reactions: existing
-                ? m.reactions.filter((r) => r !== existing)
-                : [...m.reactions, { emoji, userId }],
+                ? reactions.filter((r) => r !== existing)
+                : [...reactions, { emoji, userId }],
             };
           }),
         ]),

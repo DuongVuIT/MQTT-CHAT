@@ -16,34 +16,48 @@ export function Sidebar() {
   const { identity, users, conversations, presence, activeConversationId, setActiveConversation } =
     useChatStore();
   const [creating, setCreating] = useState(false);
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [userFilter, setUserFilter] = useState("");
+  // Identity is ALWAYS the runtime userId — display names are never identity.
+  const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState("");
 
-  const sorted = useMemo(
-    () =>
-      [...conversations].sort((a, b) => {
-        const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
-        const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
-        return tb - ta;
-      }),
-    [conversations],
-  );
+  // ONE conversationId = ONE entity: dedupe by id, order by recency.
+  const sorted = useMemo(() => {
+    const byId = new Map(conversations.map((c) => [c.id, c]));
+    return [...byId.values()].sort((a, b) => {
+      const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
+      const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
+      return tb - ta;
+    });
+  }, [conversations]);
+
+  const toggleMember = (userId: string, on: boolean): void => {
+    setSelectedMembers((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(userId);
+      else next.delete(userId);
+      return next;
+    });
+  };
 
   const createConversation = async (): Promise<void> => {
-    if (!identity || selectedMembers.length === 0) return;
+    if (!identity || selectedMembers.size === 0) return;
     try {
-      const isGroup = selectedMembers.length > 1 || groupName.trim().length > 0;
+      const isGroup = selectedMembers.size > 1 || groupName.trim().length > 0;
       const res = await api.createConversation({
         type: isGroup ? "GROUP" : "DIRECT",
         title: isGroup ? groupName.trim() || undefined : undefined,
         createdBy: identity.userId,
         memberIds: [identity.userId, ...selectedMembers],
       });
-      useChatStore.getState().setConversations([res.conversation, ...conversations]);
+      // Upsert (never prepend blindly): if the canonical conversation.created
+      // realtime event already inserted this entity, we converge on ONE row.
+      useChatStore.getState().upsertConversation(res.conversation);
       getRealtimeService().subscribeConversation(res.conversation.id);
       setActiveConversation(res.conversation.id);
       setCreating(false);
-      setSelectedMembers([]);
+      setSelectedMembers(new Set());
+      setUserFilter("");
       setGroupName("");
     } catch (error) {
       useChatStore
@@ -98,38 +112,51 @@ export function Sidebar() {
             onChange={(e) => {
               setGroupName(e.target.value);
             }}
-            placeholder="Group name (optional)"
+            placeholder="Group title (optional)"
             className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
           />
-          <ul className="space-y-1">
+          <input
+            value={userFilter}
+            onChange={(e) => {
+              setUserFilter(e.target.value);
+            }}
+            placeholder="Search users…"
+            aria-label="Search users"
+            className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-800"
+          />
+          <ul className="max-h-48 space-y-1 overflow-y-auto" aria-label="Selectable users">
             {users
-              .filter((u) => u.id !== identity?.userId)
+              .filter(
+                (u) =>
+                  u.id !== identity?.userId &&
+                  (userFilter.trim() === "" ||
+                    u.displayName.toLowerCase().includes(userFilter.trim().toLowerCase()) ||
+                    u.id.toLowerCase().includes(userFilter.trim().toLowerCase())),
+              )
               .map((u) => (
                 <li key={u.id}>
                   <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
                     <input
                       type="checkbox"
-                      checked={selectedMembers.includes(u.id)}
+                      checked={selectedMembers.has(u.id)}
                       onChange={(e) => {
-                        setSelectedMembers((prev) =>
-                          e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
-                        );
+                        toggleMember(u.id, e.target.checked);
                       }}
                     />
-                    {u.displayName}
+                    <span className="truncate">{u.displayName}</span>
                   </label>
                 </li>
               ))}
           </ul>
           <button
             type="button"
-            disabled={selectedMembers.length === 0}
+            disabled={selectedMembers.size === 0}
             onClick={() => {
               void createConversation();
             }}
             className="mt-2 w-full rounded-lg bg-indigo-600 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
-            Create
+            Create ({selectedMembers.size} selected)
           </button>
         </div>
       )}
@@ -173,7 +200,11 @@ export function Sidebar() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">
-                    {c.title ?? otherUser?.displayName ?? "Direct chat"}
+                    {c.type === "DIRECT"
+                      ? // Peer-relative label: A sees B, B sees A — never a
+                        // generic "Direct chat" when any peer info exists.
+                        (otherUser?.displayName ?? otherMember?.userId ?? "Direct chat")
+                      : (c.title ?? "Group")}
                   </span>
                   <span className="block truncate text-xs text-slate-400">
                     {c.lastMessagePreview ?? "No messages yet"}

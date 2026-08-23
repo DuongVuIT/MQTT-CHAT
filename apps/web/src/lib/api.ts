@@ -1,19 +1,24 @@
 /**
  * REST client for apps/api. History + setup only — realtime is MQTT.
+ *
+ * SINGLE PUBLIC ORIGIN: all requests go to same-origin relative paths
+ * (`/api/...`, `/media?...`) which the public gateway on :3000 proxies to
+ * internal services. The browser never talks to internal ports directly.
+ * `NEXT_PUBLIC_API_URL` may override for exotic deployments.
  */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
 /**
  * Resolve a durable media storage key to a browser-fetchable URL.
- * Keys are resolved at READ time via the API's /uploads/view endpoint
- * (302 → short-lived presigned GET), so no fragile signed URL or dev-only
- * host is ever persisted in message metadata. Legacy metadata that stored
- * an absolute http(s) URL is passed through unchanged.
+ * Canonical public path: GET /media?key=<storage-key> — the gateway routes
+ * it to the API's streaming media handler, so no object-storage host or
+ * signed URL ever reaches browser code or message metadata. Legacy metadata
+ * that stored an absolute http(s) URL is passed through unchanged.
  */
 export function mediaViewUrl(storageKey: string): string {
   if (/^https?:\/\//i.test(storageKey)) return storageKey;
-  return `${API_URL}/uploads/view?key=${encodeURIComponent(storageKey)}`;
+  return `/media?key=${encodeURIComponent(storageKey)}`;
 }
 
 export interface ApiUser {
@@ -91,6 +96,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  addMembers: (conversationId: string, userIds: string[]) =>
+    request<{ added: number }>(`/conversations/${conversationId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userIds }),
+    }),
   getMessages: (
     conversationId: string,
     opts?: { before?: number; after?: number; limit?: number },
@@ -103,16 +113,22 @@ export const api = {
       `/conversations/${conversationId}/messages?${params.toString()}`,
     );
   },
-  presignUpload: (body: {
-    conversationId: string;
-    filename: string;
-    contentType: string;
-    sizeBytes: number;
-  }) =>
-    request<{ uploadUrl: string; key: string }>("/uploads/presign", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  completeUpload: (body: { conversationId: string; key: string }) =>
-    request<{ ok: boolean }>("/uploads/complete", { method: "POST", body: JSON.stringify(body) }),
+  /**
+   * Upload a file through the same origin: POST /api/uploads (multipart) —
+   * the API streams it into object storage server-side and returns the
+   * durable storage key. No presigned URL / storage host touches the browser.
+   */
+  uploadFile: async (file: File, conversationId: string): Promise<{ key: string }> => {
+    const form = new FormData();
+    form.append("conversationId", conversationId);
+    form.append("file", file);
+    const response = await fetch(`${API_URL}/uploads`, { method: "POST", body: form });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      throw new Error(body?.error?.message ?? `Upload failed (${response.status})`);
+    }
+    return (await response.json()) as { key: string };
+  },
 };

@@ -1,20 +1,24 @@
-import mqtt, { type MqttClient } from "mqtt";
 import {
-  buildCommandEnvelope,
+  ChatRealtimeClient,
+  type ConnectionStatus,
+  type RealtimeEvent,
+  type RealtimeIdentity,
+} from "@mqtt-chat/realtime-core";
+import {
   COMMAND_TOPICS,
   EVENT_TOPICS,
   MQTT_QOS,
-  parseEventEnvelope,
-  userEventsWildcardTopic,
   type EventEnvelope,
 } from "@mqtt-chat/mqtt-contracts";
 
 /**
- * Realtime service — the ONLY place the web app touches MQTT.
+ * Web realtime service — thin wrapper around the shared
+ * `@mqtt-chat/realtime-core` client. The web app must NEVER import `mqtt`
+ * directly; all transport concerns live in realtime-core.
  *
  * Responsibilities:
- *   - single connection per tab (userId:deviceId clientId)
- *   - reconnect + automatic resubscribe
+ *   - single connection per tab (identity-scoped session)
+ *   - reconnect + automatic resubscribe (core) + presence announce
  *   - presence via connect/LWT
  *   - typed event dispatch to subscribers
  *   - command publishing (message.send/edit/delete, reaction, receipt, typing)
@@ -22,19 +26,35 @@ import {
 
 export type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
 
-export interface Identity {
-  userId: string;
-  deviceId: string;
+export type Identity = RealtimeIdentity;
+
+/**
+ * Default MQTT WebSocket URL — SAME ORIGIN via the public gateway path.
+ * `NEXT_PUBLIC_MQTT_WS_URL` may override for exotic setups.
+ */
+export function defaultMqttWsUrl(): string {
+  const override = process.env.NEXT_PUBLIC_MQTT_WS_URL;
+  if (override) return override;
+  if (typeof window !== "undefined") {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${proto}://${window.location.host}/mqtt`;
+  }
+  return "ws://localhost:3000/mqtt";
+}
+
+function toConnectionState(status: ConnectionStatus): ConnectionState {
+  return status === "offline" ? "disconnected" : status;
 }
 
 type EventHandler = (envelope: EventEnvelope) => void;
 
 export class RealtimeService {
-  private client: MqttClient | null = null;
+  private core: ChatRealtimeClient | null = null;
   private handlers = new Set<EventHandler>();
   private stateHandlers = new Set<(state: ConnectionState) => void>();
-  private subscribedTopics = new Set<string>();
   private identity: Identity | null = null;
+  /** Global topics requested via subscribeGlobal — restored on reconnect by core extras. */
+  private globalTopics: string[] = [];
 
   onState(handler: (state: ConnectionState) => void): () => void {
     this.stateHandlers.add(handler);
@@ -46,133 +66,82 @@ export class RealtimeService {
     return () => this.handlers.delete(handler);
   }
 
+  /**
+   * Connect (or re-connect as a NEW identity). If a session already exists
+   * for another identity it is torn down completely first — switching user
+   * must never reuse or mutate the previous MQTT session.
+   */
   async connect(identity: Identity): Promise<void> {
-    if (this.client?.connected) return;
+    if (this.identity && this.core?.hasSession) {
+      const sameIdentity =
+        this.identity.userId === identity.userId && this.identity.deviceId === identity.deviceId;
+      if (sameIdentity && this.core.status === "connected") return;
+    }
+    await this.disconnect();
+
     this.identity = identity;
+    // Conversation lifecycle + receipts arrive on flat/user topics; message/
+    // reaction/typing/presence fan-out is covered by the core's events wildcard.
+    this.globalTopics = [
+      `${EVENT_TOPICS.conversationCreated}/#`,
+      `${EVENT_TOPICS.conversationUpdated}/#`,
+      `${EVENT_TOPICS.conversationMemberJoined}/#`,
+      `${EVENT_TOPICS.conversationMemberLeft}/#`,
+    ];
 
-    const wsUrl = process.env.NEXT_PUBLIC_MQTT_WS_URL ?? "ws://localhost:8083/mqtt";
-    // MQTT clientIds must be UNIQUE PER CONNECTION. A bare `userId:deviceId`
-    // collides whenever the same identity is open twice (two tabs, a zombie
-    // session + a fresh one): EMQX takeover kicks the old connection, its
-    // auto-reconnect kicks the new one back — an endless presence
-    // online/offline flap. The logical deviceId stays in the actor envelope
-    // for presence accounting; only the broker clientId gains a nonce.
-    const clientId = `${identity.userId}:${identity.deviceId}:${Date.now()}`;
-
-    const client = mqtt.connect(wsUrl, {
-      clientId,
-      clean: true,
-      keepalive: 30,
-      reconnectPeriod: 2000,
-      connectTimeout: 10_000,
+    const core = new ChatRealtimeClient({
+      url: defaultMqttWsUrl(),
+      identity,
+      extraEventWildcards: this.globalTopics,
       will: {
         topic: COMMAND_TOPICS.presenceSet,
         // LWT must be a valid command envelope — the broker publishes it on
         // abrupt disconnect and chat-worker validates it like any command.
         payload: JSON.stringify({
-          requestId: crypto.randomUUID(),
+          requestId:
+            globalThis.crypto?.randomUUID?.() ??
+            `${Date.now()}-${Math.random().toString(36).slice(2)}`,
           commandType: "presence.set",
           version: 1,
           timestamp: new Date().toISOString(),
           actor: { userId: identity.userId, deviceId: identity.deviceId },
           data: { isOnline: false },
         }),
-        qos: 1 as const,
-        retain: false,
+        qos: 1,
+      },
+      onStatus: (status) => this.emitState(toConnectionState(status)),
+      onConnect: () => {
+        // Announce presence after every (re)connect.
+        void core.setPresence(true).catch(() => {
+          /* transient — next reconnect retries */
+        });
+      },
+      onEvent: (event: RealtimeEvent) => {
+        try {
+          // Core emits parsed JSON; contracts validation happens here so both
+          // strictness and error handling stay in one place per platform shell.
+          const envelope = event as unknown as EventEnvelope;
+          for (const handler of this.handlers) handler(envelope);
+        } catch {
+          // Malformed payload — ignore (server events are trusted but validated).
+        }
       },
     });
 
-    this.client = client;
-
-    client.on("connect", () => {
-      this.emitState("connected");
-      // Re-subscribe everything after (re)connect.
-      for (const topic of this.subscribedTopics) {
-        client.subscribe(topic, { qos: 1 });
-      }
-      // Announce presence.
-      this.publishCommand("presence.set", { isOnline: true }, MQTT_QOS.command);
-    });
-
-    client.on("reconnect", () => {
-      this.emitState("reconnecting");
-    });
-    client.on("close", () => {
-      if (!client.connected) this.emitState("disconnected");
-    });
-    client.on("error", () => {
-      this.emitState("disconnected");
-    });
-
-    client.on("message", (_topic, payload) => {
-      try {
-        const envelope = parseEventEnvelope(payload);
-        for (const handler of this.handlers) handler(envelope);
-      } catch {
-        // Malformed payload — ignore (server events are trusted but validated).
-      }
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("MQTT connect timeout"));
-      }, 15_000);
-      client.once("connect", () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      client.once("error", (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      });
-    });
+    this.core = core;
+    await core.connect();
   }
 
-  /**
-   * Subscribe to the conversation-scoped event streams. Canonical events are
-   * published on flat per-event-type topics (see EVENT_TOPICS), so clients use
-   * `/#` wildcards and route by the conversationId carried in each envelope.
-   * Idempotent.
-   */
+  /** Idempotent; conversation fan-out is covered by wildcards (tracked for API compat). */
   subscribeConversation(_conversationId: string): void {
-    if (!this.client) return;
-    const topics = [
-      `${EVENT_TOPICS.messageCreated}/#`,
-      `${EVENT_TOPICS.messageEdited}/#`,
-      `${EVENT_TOPICS.messageDeleted}/#`,
-      `${EVENT_TOPICS.reactionAdded}/#`,
-      `${EVENT_TOPICS.reactionRemoved}/#`,
-    ];
-    for (const topic of topics) {
-      if (!this.subscribedTopics.has(topic)) {
-        this.subscribedTopics.add(topic);
-        this.client.subscribe(topic, { qos: 1 });
-      }
-    }
+    this.core?.subscribeConversation(_conversationId);
   }
 
-  /** Global topics: own receipts + all presence/typing + conversation lifecycle. */
+  /** Per-user targeted topic is subscribed by core; kept for API compatibility. */
   subscribeGlobal(userId: string): void {
-    if (!this.client) return;
-    const topics = [
-      `${EVENT_TOPICS.presenceOnline}/#`,
-      `${EVENT_TOPICS.presenceOffline}/#`,
-      `${EVENT_TOPICS.typingStarted}/#`,
-      `${EVENT_TOPICS.typingStopped}/#`,
-      // Conversation lifecycle (created/updated/member changes) — flat topics.
-      `${EVENT_TOPICS.conversationCreated}/#`,
-      `${EVENT_TOPICS.conversationUpdated}/#`,
-      `${EVENT_TOPICS.conversationMemberJoined}/#`,
-      `${EVENT_TOPICS.conversationMemberLeft}/#`,
-      // Receipts are delivered on per-user topics (chat/v1/users/{id}/events/...).
-      userEventsWildcardTopic(userId),
-    ];
-    for (const topic of topics) {
-      if (!this.subscribedTopics.has(topic)) {
-        this.subscribedTopics.add(topic);
-        this.client.subscribe(topic, { qos: 1 });
-      }
-    }
+    // no-op beyond API compat: core subscribes chat/v1/users/{id}/events/# and
+    // the lifecycle extras passed at connect().
+    void userId;
   }
 
   publishCommand(
@@ -189,26 +158,23 @@ export class RealtimeService {
     data: Record<string, unknown>,
     qos: 0 | 1 = MQTT_QOS.command,
   ): void {
-    if (!this.client || !this.identity) return;
-    const envelope = buildCommandEnvelope({
-      commandType,
-      actor: { userId: this.identity.userId, deviceId: this.identity.deviceId },
-      data: data as never,
-    });
-    const topic =
-      COMMAND_TOPICS[commandType as keyof typeof COMMAND_TOPICS] ?? COMMAND_TOPICS.messageSend;
-    this.client.publish(topic, JSON.stringify(envelope), { qos });
+    const core = this.core;
+    if (!core) return;
+    // The core publishes a canonical envelope (nested `data`) on the mapped
+    // command topic; failures are swallowed at this fire-and-forget boundary.
+    void core.publishCommand(commandType, data, qos).catch(() => {});
   }
 
-  disconnect(): void {
-    if (!this.client) return;
-    // Graceful offline announcement before closing.
-    if (this.identity) {
-      this.publishCommand("presence.set", { isOnline: false }, MQTT_QOS.command);
+  /** Full teardown — graceful offline announce, socket closed, state cleared. */
+  async disconnect(): Promise<void> {
+    const core = this.core;
+    if (!core) return;
+    if (core.status === "connected" && this.identity) {
+      await core.setPresence(false).catch(() => {});
     }
-    this.subscribedTopics.clear();
-    this.client.end(true);
-    this.client = null;
+    await core.disconnect();
+    this.core = null;
+    this.identity = null;
     this.emitState("disconnected");
   }
 

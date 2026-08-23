@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { api, type ApiConversation, type ApiMessage } from "@/lib/api";
+import { api, type ApiConversation } from "@/lib/api";
+import { normalizeMessage } from "@mqtt-chat/realtime-core";
 import { getRealtimeService, type ConnectionState } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
 import { loadStoredIdentity } from "@/lib/identity";
@@ -10,6 +11,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { MessageList } from "@/components/MessageList";
 import { Composer } from "@/components/Composer";
 import { DetailsPanel } from "@/components/DetailsPanel";
+import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { ConnectionBadge } from "@mqtt-chat/ui";
 import type { EventEnvelope } from "@mqtt-chat/mqtt-contracts";
 
@@ -36,6 +38,13 @@ export default function ChatPage() {
       router.replace("/");
       return;
     }
+    // Identity switch hygiene: if a DIFFERENT user was active in this tab,
+    // drop every identity-scoped transient state before syncing new data —
+    // conversations/pending/typing/presence never leak across identities.
+    const prev = useChatStore.getState().identity;
+    if (prev && (prev.userId !== identity.userId || prev.deviceId !== identity.deviceId)) {
+      useChatStore.getState().resetTransient();
+    }
     store.setIdentity(identity);
 
     const realtime = getRealtimeService();
@@ -45,19 +54,24 @@ export default function ChatPage() {
     // realtime service while the second run early-returns on the bootstrap
     // guard — leaving the UI stuck "Offline" and deaf to all events.
     realtime.onState((state: ConnectionState) => {
-      const prev = prevConnectionState.current;
+      const prevState = prevConnectionState.current;
       prevConnectionState.current = state;
       useChatStore.getState().setConnectionState(state);
       // Reconnect recovery: a drop (reconnecting/disconnected) that returns to
       // "connected" means canonical events were missed while offline. Refetch
       // the conversation list and the active conversation's messages so the
-      // UI converges with the server WITHOUT a manual reload.
-      if (state === "connected" && (prev === "reconnecting" || prev === "disconnected")) {
+      // UI converges with the server WITHOUT a manual reload — and flush any
+      // sends that were QUEUED while offline (same clientMessageId).
+      if (state === "connected" && (prevState === "reconnecting" || prevState === "disconnected")) {
+        flushQueuedMessages();
         void recoverAfterReconnect();
       }
     });
     realtime.onEvent((envelope: EventEnvelope) => {
-      handleEvent(envelope, identity.userId);
+      // NO captured identity: the active identity is read from the store at
+      // event time so a user switch can never leave stale-perspective logic
+      // bound to the singleton realtime service.
+      handleEvent(envelope);
     });
 
     void (async () => {
@@ -97,6 +111,19 @@ export default function ChatPage() {
   const activeId = store.activeConversationId;
   const activeConversation = store.conversations.find((c) => c.id === activeId) ?? null;
 
+  // Peer-relative DIRECT label: A sees B's name, B sees A's name.
+  const activeTitle = (() => {
+    if (!activeConversation) return "";
+    if (activeConversation.type === "GROUP") {
+      return activeConversation.title ?? "Group";
+    }
+    const peerId = activeConversation.members?.find(
+      (m) => m.userId !== store.identity?.userId,
+    )?.userId;
+    const peer = store.users.find((u) => u.id === peerId);
+    return peer?.displayName ?? peerId ?? "Direct chat";
+  })();
+
   return (
     <div className="flex h-screen">
       <Sidebar />
@@ -105,10 +132,12 @@ export default function ChatPage() {
           <>
             <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
               <div className="min-w-0">
-                <h2 className="truncate font-semibold">
-                  {activeConversation.title ?? "Direct chat"}
-                </h2>
-                <p className="text-xs text-slate-500">{activeConversation.memberCount} members</p>
+                <h2 className="truncate font-semibold">{activeTitle}</h2>
+                <p className="text-xs text-slate-500">
+                  {activeConversation.type === "GROUP"
+                    ? `${activeConversation.memberCount} members`
+                    : "Direct conversation"}
+                </p>
               </div>
               <ConnectionBadge state={store.connectionState} />
             </header>
@@ -122,15 +151,60 @@ export default function ChatPage() {
         )}
       </main>
       <DetailsPanel conversation={activeConversation} />
+      <DiagnosticsPanel />
     </div>
   );
 }
 
-/** Route canonical events into the store. */
-function handleEvent(envelope: EventEnvelope, selfUserId: string): void {
+/**
+ * Flush messages that were QUEUED while offline. Republishes with the SAME
+ * clientMessageId — chat-worker dedupes, so retries are idempotent.
+ */
+function flushQueuedMessages(): void {
   const s = useChatStore.getState();
+  for (const p of s.pendingMessages) {
+    if (p.status !== "queued") continue;
+    s.retryPending(p.clientMessageId);
+    getRealtimeService().publishCommand("message.send", {
+      conversationId: p.conversationId,
+      clientMessageId: p.clientMessageId,
+      content: p.content.startsWith("📎") ? "" : p.content,
+      type: p.content.startsWith("📎") ? "FILE" : "TEXT",
+      replyToId: p.replyToId,
+      metadata: null,
+    });
+  }
+}
+
+/** Route canonical events into the store. */
+function handleEvent(envelope: EventEnvelope): void {
+  const s = useChatStore.getState();
+  // Perspective is ALWAYS derived from the active identity at event time.
+  const selfUserId = s.identity?.userId ?? "";
   const data = envelope.data as Record<string, unknown>;
   const conversationId = envelope.conversationId ?? String(data["conversationId"] ?? "");
+
+  /** Parse a canonical conversation summary into the REST list-item shape. */
+  const toConversation = (): ApiConversation => {
+    const rawMembers = Array.isArray(data["members"]) ? data["members"] : [];
+    return {
+      id: String(data["id"] ?? conversationId),
+      type: (data["type"] as ApiConversation["type"]) ?? "GROUP",
+      title: (data["title"] as string | null) ?? null,
+      memberCount: Number(data["memberCount"] ?? rawMembers.length),
+      lastSequence: Number(data["lastSequence"] ?? 0),
+      lastMessagePreview: (data["lastMessagePreview"] as string | null) ?? null,
+      lastMessageAt: (data["lastMessageAt"] as string | null) ?? null,
+      members: rawMembers.map((m) => {
+        const member = m as Record<string, unknown>;
+        return {
+          userId: String(member["userId"]),
+          role: String(member["role"] ?? "MEMBER"),
+          lastReadSequence: Number(member["lastReadSequence"] ?? 0),
+        };
+      }),
+    };
+  };
 
   switch (envelope.eventType) {
     case "conversation.created": {
@@ -140,48 +214,67 @@ function handleEvent(envelope: EventEnvelope, selfUserId: string): void {
       const rawMembers = Array.isArray(data["members"]) ? data["members"] : [];
       const isMember = rawMembers.some((m) => (m as { userId?: unknown })["userId"] === selfUserId);
       if (!isMember) break;
-      const conversation: ApiConversation = {
-        id: String(data["id"]),
-        type: (data["type"] as ApiConversation["type"]) ?? "GROUP",
-        title: (data["title"] as string | null) ?? null,
-        memberCount: Number(data["memberCount"] ?? rawMembers.length),
-        lastSequence: Number(data["lastSequence"] ?? 0),
-        lastMessagePreview: (data["lastMessagePreview"] as string | null) ?? null,
-        lastMessageAt: (data["lastMessageAt"] as string | null) ?? null,
-        members: rawMembers.map((m) => {
-          const member = m as Record<string, unknown>;
-          return {
-            userId: String(member["userId"]),
-            role: String(member["role"] ?? "MEMBER"),
-            lastReadSequence: Number(member["lastReadSequence"] ?? 0),
-          };
-        }),
-      };
-      s.upsertConversation(conversation);
-      getRealtimeService().subscribeConversation(conversation.id);
+      s.upsertConversation(toConversation());
+      getRealtimeService().subscribeConversation(String(data["id"]));
+      break;
+    }
+    case "conversation.member-joined":
+    case "conversation.member-left": {
+      // Membership changed — the payload carries the FULL post-change summary.
+      // Only relevant if this user is (still) a member of the conversation.
+      const conversation = toConversation();
+      const stillMember =
+        envelope.eventType === "conversation.member-joined"
+          ? conversation.members.some((m) => m.userId === selfUserId)
+          : // For a leave event, non-members keep nothing to update; if I was
+            // the one removed, drop the entity entirely.
+            String(data["removedUserId"]) !== selfUserId &&
+            useChatStore.getState().conversations.some((c) => c.id === conversation.id);
+      if (
+        envelope.eventType === "conversation.member-left" &&
+        String(data["removedUserId"]) === selfUserId
+      ) {
+        useChatStore
+          .getState()
+          .setConversations(
+            useChatStore.getState().conversations.filter((c) => c.id !== conversation.id),
+          );
+        break;
+      }
+      if (!stillMember) break;
+      // Preserve locally-known preview/sequence (event payload has no message info).
+      const existingConv = useChatStore
+        .getState()
+        .conversations.find((c) => c.id === conversation.id);
+      s.upsertConversation({
+        ...conversation,
+        lastMessagePreview: existingConv?.lastMessagePreview ?? conversation.lastMessagePreview,
+        lastMessageAt: existingConv?.lastMessageAt ?? conversation.lastMessageAt,
+        lastSequence: Math.max(existingConv?.lastSequence ?? 0, conversation.lastSequence),
+      });
+      break;
+    }
+    case "conversation.updated": {
+      const updated = toConversation();
+      const known = useChatStore.getState().conversations.find((c) => c.id === updated.id);
+      if (!known && !updated.members.some((m) => m.userId === selfUserId)) break;
+      s.upsertConversation({
+        ...updated,
+        lastMessagePreview: updated.lastMessagePreview ?? known?.lastMessagePreview ?? null,
+        lastMessageAt: updated.lastMessageAt ?? known?.lastMessageAt ?? null,
+        lastSequence: Math.max(known?.lastSequence ?? 0, updated.lastSequence),
+      });
       break;
     }
     case "message.created": {
-      const sequence = Number(data["sequence"]);
-      const type = (data["type"] as ApiMessage["type"]) ?? "TEXT";
-      const content = String(data["content"] ?? "");
-      s.upsertMessage({
-        id: String(data["messageId"]),
-        clientMessageId: String(data["clientMessageId"] ?? ""),
-        conversationId,
-        senderId: String(data["senderId"]),
-        senderType: (data["senderType"] as "USER" | "BOT" | "SYSTEM") ?? "USER",
-        senderName: String(data["senderName"] ?? data["senderId"]),
-        sequence,
-        type,
-        content,
-        replyToId: (data["replyToId"] as string | null) ?? null,
-        metadata: (data["metadata"] as Record<string, unknown> | null) ?? null,
-        reactions: [],
-        createdAt: envelope.timestamp,
-        editedAt: null,
-        deletedAt: null,
-      });
+      // ONE canonical normalizer for every message entering the UI (shared
+      // with mobile) — guarantees invariants (reactions array, null dates).
+      const message = normalizeMessage(data);
+      if (!message.id || !message.conversationId) break; // malformed — ignore
+      const sequence = message.sequence;
+      const type = message.type;
+      const content = message.content;
+      s.upsertMessage(message);
       // Keep the conversation list entry in sync (lastSequence/preview/time)
       // so every client converges on the same server-side sequence.
       const preview = type === "TEXT" ? content.slice(0, 120) : `[${type.toLowerCase()}]`;

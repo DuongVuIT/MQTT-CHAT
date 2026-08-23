@@ -230,3 +230,122 @@ describe("malformed conversation payload regression (Bug #9)", () => {
     }).not.toThrow();
   });
 });
+
+describe("chat-store identity switch + normalized state", () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      identity: null,
+      users: [],
+      conversations: [],
+      activeConversationId: null,
+      messagesByConversation: {},
+      pendingMessages: [],
+      typingUsers: {},
+      presence: {},
+      hasMoreHistory: {},
+      loadingHistory: false,
+      error: null,
+    });
+  });
+
+  const conv = (id: string, seq = 0): ApiConversation => ({
+    id,
+    type: "GROUP",
+    title: id,
+    memberCount: 2,
+    lastSequence: seq,
+    lastMessagePreview: null,
+    lastMessageAt: null,
+    members: [
+      { userId: "duong", role: "ADMIN", lastReadSequence: 0 },
+      { userId: "alice", role: "MEMBER", lastReadSequence: 0 },
+    ],
+  });
+
+  it("resetTransient drops ALL identity-scoped state (no leak across identities)", () => {
+    useChatStore.getState().setIdentity({ userId: "duong", deviceId: "web-1" });
+    useChatStore.getState().setConversations([conv("c1", 3)]);
+    useChatStore.getState().addPending({
+      clientMessageId: "cmid-x",
+      conversationId: "c1",
+      content: "hi",
+      replyToId: null,
+      status: "queued",
+    });
+    useChatStore.getState().setTyping("c1", "alice", true);
+    useChatStore.getState().setPresence("alice", true);
+
+    useChatStore.getState().resetTransient();
+
+    const s = useChatStore.getState();
+    expect(s.conversations).toEqual([]);
+    expect(s.pendingMessages).toEqual([]);
+    expect(s.typingUsers).toEqual({});
+    expect(s.presence).toEqual({});
+    expect(s.activeConversationId).toBeNull();
+    // identity itself is NOT cleared by resetTransient
+    expect(s.identity).toEqual({ userId: "duong", deviceId: "web-1" });
+  });
+
+  it("upsertConversation NEVER duplicates an entity (ONE id = ONE conversation)", () => {
+    useChatStore.getState().upsertConversation(conv("c1"));
+    useChatStore.getState().upsertConversation(conv("c2"));
+    // Same id arrives twice (REST + realtime event) — must stay ONE entity.
+    useChatStore.getState().upsertConversation({ ...conv("c1"), title: "updated" });
+
+    const list = useChatStore.getState().conversations;
+    expect(list).toHaveLength(2);
+    expect(list.filter((c) => c.id === "c1")).toHaveLength(1);
+    expect(list.find((c) => c.id === "c1")?.title).toBe("updated");
+  });
+
+  it("queued pending survives resetPending-style flows and retries to pending", () => {
+    useChatStore.getState().addPending({
+      clientMessageId: "cmid-q",
+      conversationId: "c1",
+      content: "offline msg",
+      replyToId: null,
+      status: "queued",
+    });
+    useChatStore.getState().retryPending("cmid-q");
+    expect(useChatStore.getState().pendingMessages[0]?.status).toBe("pending");
+    useChatStore.getState().markPendingFailed("cmid-q");
+    expect(useChatStore.getState().pendingMessages[0]?.status).toBe("failed");
+    useChatStore.getState().resolvePending("cmid-q");
+    expect(useChatStore.getState().pendingMessages).toHaveLength(0);
+  });
+});
+
+describe("chat-store reaction contract defense", () => {
+  it("toggleReaction on a malformed message without reactions array does not crash", () => {
+    useChatStore.setState({ messagesByConversation: {}, pendingMessages: [] });
+    const malformed = {
+      ...sampleMessage("m-bad", "cmid-bad"),
+      reactions: undefined as unknown as ApiMessage["reactions"],
+    };
+    useChatStore.getState().upsertMessage(malformed);
+    expect(() => {
+      useChatStore.getState().toggleReaction("m-bad", "👍", "duong");
+    }).not.toThrow();
+    // After the toggle the invariant is restored: reactions is a valid array.
+    const stored = useChatStore
+      .getState()
+      .messagesByConversation["conv-general"]?.find((m) => m.id === "m-bad");
+    expect(Array.isArray(stored?.reactions)).toBe(true);
+    expect(stored?.reactions).toEqual([{ emoji: "👍", userId: "duong" }]);
+  });
+
+  it("history + realtime merge keeps ONE canonical message with valid reactions", () => {
+    useChatStore.setState({ messagesByConversation: {}, pendingMessages: [] });
+    const row = { ...sampleMessage("m1", "c1"), conversationId: "conv-x" };
+    // HTTP history row (reactions present)
+    useChatStore.getState().setMessages("conv-x", [row], false);
+    // Same message re-arrives via realtime (QoS1 duplicate) — still ONE entity
+    useChatStore
+      .getState()
+      .upsertMessage({ ...row, reactions: [{ emoji: "❤️", userId: "alice" }] });
+    const list = useChatStore.getState().messagesByConversation["conv-x"] ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0]!.reactions).toEqual([{ emoji: "❤️", userId: "alice" }]);
+  });
+});

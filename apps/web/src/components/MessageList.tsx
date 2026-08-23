@@ -22,6 +22,7 @@ export function MessageList({ conversationId }: { conversationId: string }) {
   const messages = useChatStore((s) => s.messagesByConversation[conversationId]);
   const pending = useChatStore((s) => s.pendingMessages);
   const typing = useChatStore((s) => s.typingUsers[conversationId] ?? NO_TYPING_USERS);
+  const users = useChatStore((s) => s.users);
   const identity = useChatStore((s) => s.identity);
   const hasMore = useChatStore((s) => s.hasMoreHistory[conversationId] ?? false);
   const loadingHistory = useChatStore((s) => s.loadingHistory);
@@ -186,7 +187,8 @@ export function MessageList({ conversationId }: { conversationId: string }) {
 
         {typing.length > 0 && (
           <p className="mt-2 text-xs italic text-slate-400" aria-live="polite">
-            {typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…
+            {typing.map((id) => users.find((u) => u.id === id)?.displayName ?? id).join(", ")}{" "}
+            {typing.length === 1 ? "is" : "are"} typing…
           </p>
         )}
         <div ref={bottomRef} />
