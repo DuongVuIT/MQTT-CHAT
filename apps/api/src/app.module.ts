@@ -1,4 +1,6 @@
 import {
+  Controller,
+  Get,
   Logger,
   Module,
   type ExceptionFilter,
@@ -12,6 +14,7 @@ import { PrismaService } from "./prisma.service";
 import { RedisService } from "./redis.service";
 import { HealthController } from "./controllers/health.controller";
 import { ChatController } from "./controllers/chat.controller";
+import { MediaController } from "./controllers/media.controller";
 import { UploadsController } from "./controllers/uploads.controller";
 import { BotsController } from "./controllers/bots.controller";
 import { AdminController } from "./controllers/admin.controller";
@@ -75,11 +78,26 @@ function isCanonicalErrorBody(body: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err;
 }
 
+/**
+ * Root metadata — GET / (outside the /api prefix). Deliberately NOT a UI:
+ * users never browse the internal API port; this exists only so a direct
+ * probe of the internal service identifies itself.
+ */
+@Controller()
+class RootController {
+  @Get()
+  root(): { service: string; status: string; routes: string } {
+    return { service: "mqtt-chat-api", status: "ok", routes: "/api/*" };
+  }
+}
+
 @Module({
   controllers: [
+    RootController,
     HealthController,
     ChatController,
     UploadsController,
+    MediaController,
     BotsController,
     AdminController,
   ],

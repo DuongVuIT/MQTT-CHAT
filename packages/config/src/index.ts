@@ -62,8 +62,10 @@ const serverEnvSchema = z.object({
 });
 
 const webEnvSchema = z.object({
-  NEXT_PUBLIC_API_URL: z.string().min(1).default("http://localhost:3001"),
-  NEXT_PUBLIC_MQTT_WS_URL: z.string().min(1).default("ws://localhost:8083/mqtt"),
+  /** Same-origin default — the public gateway serves /api/* on :3000. */
+  NEXT_PUBLIC_API_URL: z.string().default("/api"),
+  /** Same-origin default — the gateway upgrades ws://…/mqtt to EMQX. */
+  NEXT_PUBLIC_MQTT_WS_URL: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

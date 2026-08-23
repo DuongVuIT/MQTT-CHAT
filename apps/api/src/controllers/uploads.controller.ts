@@ -1,5 +1,14 @@
-import { Body, Controller, Get, Inject, NotFoundException, Post, Query, Res } from "@nestjs/common";
-import type { Response } from "express";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Inject,
+  Post,
+  UploadedFile,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Express } from "express";
 import { z } from "zod";
 import { S3CompatibleStorage, buildMediaKey } from "@mqtt-chat/storage";
 import { loadServerEnv } from "@mqtt-chat/config";
@@ -8,43 +17,31 @@ import { ZodValidationPipe, apiError } from "../common";
 
 /**
  * Media upload flow (binary NEVER goes through MQTT):
- *   client → POST /uploads/presign → presigned PUT URL → MinIO/S3
- *   client sends MQTT message with metadata after upload completes.
+ *   client → POST /api/uploads (multipart, SAME ORIGIN via the gateway)
+ *          → API streams the bytes into object storage server-side
+ *          → client sends an MQTT message carrying metadata.storageKey.
+ *
+ * The browser never sees a presigned URL or object-storage host — that
+ * presigned-PUT flow leaked the internal MinIO origin into browser code.
  */
 
-const presignSchema = z.object({
-  conversationId: z.string().min(1),
-  filename: z.string().min(1).max(255),
-  contentType: z.enum([
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "video/mp4",
-    "video/webm",
-    "audio/webm",
-    "audio/mpeg",
-    "application/pdf",
-  ]),
-  sizeBytes: z
-    .number()
-    .int()
-    .positive()
-    .max(50 * 1024 * 1024), // 50MB cap
-});
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB cap
 
-const completeSchema = z.object({
-  conversationId: z.string().min(1),
-  key: z.string().min(1),
-});
+const ALLOWED_CONTENT_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/webm",
+  "audio/webm",
+  "audio/mpeg",
+  "application/pdf",
+] as const;
 
-/**
- * Media keys are produced exclusively by buildMediaKey():
- *   media/{conversationId}/{timestamp}-{safeName}
- * The strict pattern prevents the view endpoint from being abused as a
- * bucket-wide signed-URL minter.
- */
-const MEDIA_KEY_PATTERN = /^media\/[A-Za-z0-9._-]+\/[0-9]+-[A-Za-z0-9._-]+$/;
+const uploadSchema = z.object({
+  conversationId: z.string().min(1),
+});
 
 @Controller("uploads")
 export class UploadsController {
@@ -63,48 +60,47 @@ export class UploadsController {
     });
   }
 
-  @Post("presign")
-  async presign(@Body(new ZodValidationPipe(presignSchema)) body: unknown) {
-    const data = body as z.infer<typeof presignSchema>;
-    const key = buildMediaKey(data.conversationId, data.filename);
-    const { uploadUrl } = await this.storage.createUploadUrl({
-      key,
-      contentType: data.contentType,
+  @Post()
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: MAX_UPLOAD_BYTES },
+    }),
+  )
+  async upload(
+    @Body(new ZodValidationPipe(uploadSchema)) body: unknown,
+    @UploadedFile() file?: Express.Multer.File,
+  ): Promise<{ key: string; filename: string; mimeType: string; size: number }> {
+    const data = body as z.infer<typeof uploadSchema>;
+    if (!file) {
+      throw new BadRequestException(apiError("BAD_REQUEST", "Missing file field"));
+    }
+    const mimeType = file.mimetype || "application/octet-stream";
+    if (!(ALLOWED_CONTENT_TYPES as readonly string[]).includes(mimeType)) {
+      throw new BadRequestException(
+        apiError("UNSUPPORTED_MEDIA_TYPE", `Unsupported type ${mimeType}`),
+      );
+    }
+    if (!file.size || file.size <= 0) {
+      throw new BadRequestException(apiError("BAD_REQUEST", "Empty upload"));
+    }
+
+    // The conversation must exist — uploads are conversation-scoped keys and
+    // we refuse orphan objects for conversations that were never created.
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: data.conversationId },
+      select: { id: true },
     });
-    return { uploadUrl, key };
-  }
+    if (!conversation) {
+      throw new BadRequestException(apiError("CONVERSATION_NOT_FOUND", "Unknown conversation"));
+    }
 
-  @Post("complete")
-  async complete(@Body(new ZodValidationPipe(completeSchema)) body: unknown) {
-    const data = body as z.infer<typeof completeSchema>;
-    // Verify the object actually exists in storage before acknowledging.
-    // (getUrl only mints a signed URL — it never checks existence, so a
-    // HEAD request is required to reject keys that were never uploaded.)
-    const exists = await this.storage.exists(data.key);
-    if (!exists) {
-      throw new NotFoundException(apiError("UPLOAD_NOT_FOUND", "Uploaded object not found"));
-    }
-    return { ok: true, key: data.key };
-  }
-
-  /**
-   * Media view endpoint — resolves a durable storage key to a short-lived
-   * presigned GET URL via HTTP 302. Clients store ONLY the storage key in
-   * message metadata (never a fragile dev signed URL or host) and point
-   * <img>/download src at this endpoint; the browser follows the redirect
-   * to object storage. Signed URLs are minted per request, so they can
-   * never be stale in history.
-   */
-  @Get("view")
-  async view(@Query("key") key: string, @Res() res: Response): Promise<void> {
-    if (!key || key.length > 512 || !MEDIA_KEY_PATTERN.test(key)) {
-      throw new NotFoundException(apiError("BAD_REQUEST", "Invalid media key"));
-    }
-    const exists = await this.storage.exists(key);
-    if (!exists) {
-      throw new NotFoundException(apiError("MEDIA_NOT_FOUND", "Media object not found"));
-    }
-    const url = await this.storage.createDownloadUrl(key);
-    res.redirect(302, url);
+    const key = buildMediaKey(data.conversationId, file.originalname || "upload");
+    await this.storage.upload(key, file.buffer, mimeType);
+    return {
+      key,
+      filename: file.originalname ?? "upload",
+      mimeType,
+      size: file.size,
+    };
   }
 }

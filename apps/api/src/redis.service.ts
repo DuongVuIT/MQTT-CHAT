@@ -27,6 +27,17 @@ export class RedisService implements OnModuleDestroy {
     return this.presenceRepo;
   }
 
+  /** Liveness probe for /api/health — never throws. */
+  async ping(): Promise<"up" | "down"> {
+    try {
+      if (!this.client) return "down";
+      await this.client.ping();
+      return "up";
+    } catch {
+      return "down";
+    }
+  }
+
   async onModuleDestroy(): Promise<void> {
     if (this.client) await closeRedisClient(this.client);
   }

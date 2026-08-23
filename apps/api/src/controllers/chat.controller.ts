@@ -13,6 +13,8 @@ import { z } from "zod";
 import {
   buildEventEnvelope,
   conversationCreatedDataSchema,
+  conversationMemberJoinedDataSchema,
+  conversationMemberLeftDataSchema,
   EVENT_TOPICS,
   type ConversationCreatedData,
 } from "@mqtt-chat/mqtt-contracts";
@@ -104,6 +106,49 @@ export class ChatController {
       },
     });
     return { user };
+  }
+
+  /**
+   * Test-fixture teardown endpoint: deletes EXACTLY this runtime id.
+   * Refuses (409) when the user still authored messages elsewhere — callers
+   * must clean their conversations first (cascade removes those messages).
+   */
+  @Delete("users/:id")
+  async deleteUser(@Param("id") id: string) {
+    try {
+      await this.prisma.user.delete({ where: { id } });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2003" // foreign key violation: still has messages
+      ) {
+        throw new NotFoundException(
+          apiError("USER_HAS_MESSAGES", "User still owns messages; remove them first"),
+        );
+      }
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2025" // record not found — treat as already cleaned
+      ) {
+        return { deleted: true, absent: true };
+      }
+      throw err;
+    }
+    return { deleted: true };
+  }
+
+  /** Test-fixture teardown: conversation cascade removes members+messages+reactions. */
+  @Delete("conversations/:id")
+  async deleteConversation(@Param("id") id: string) {
+    try {
+      await this.prisma.conversation.delete({ where: { id } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
+        return { deleted: true, absent: true };
+      }
+      throw err;
+    }
+    return { deleted: true };
   }
 
   // ---------- Conversations ----------
@@ -280,19 +325,109 @@ export class ChatController {
     if (!conversation) {
       throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
     }
-    await this.prisma.conversationMember.createMany({
-      data: data.userIds.map((userId) => ({ conversationId: id, userId })),
-      skipDuplicates: true,
+    // Membership change + canonical outbox event in ONE transaction —
+    // clients reconcile from the event, never a manual reload.
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.conversationMember.createMany({
+        data: data.userIds.map((userId) => ({ conversationId: id, userId })),
+        skipDuplicates: true,
+      });
+      return this.emitConversationMembersChanged(tx, {
+        conversationId: id,
+        actorUserId: conversation.createdBy,
+        kind: "joined",
+        changedUserIds: data.userIds,
+      });
     });
-    return { added: data.userIds.length };
+    return { added: data.userIds.length, conversation: result };
   }
 
   @Delete("conversations/:id/members/:userId")
   async removeMember(@Param("id") id: string, @Param("userId") userId: string) {
-    await this.prisma.conversationMember.deleteMany({
-      where: { conversationId: id, userId },
+    const conversation = await this.prisma.conversation.findUnique({ where: { id } });
+    if (!conversation) {
+      throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.conversationMember.deleteMany({ where: { conversationId: id, userId } });
+      await this.emitConversationMembersChanged(tx, {
+        conversationId: id,
+        actorUserId: conversation.createdBy,
+        kind: "left",
+        changedUserIds: [userId],
+      });
     });
     return { removed: true };
+  }
+
+  /**
+   * Build + enqueue the canonical member-joined/left event inside the caller's
+   * transaction. Payload = full post-change conversation summary (mirrors the
+   * REST list item / conversation.created contract) so clients can upsert the
+   * ONE conversation entity directly.
+   */
+  private async emitConversationMembersChanged(
+    tx: Prisma.TransactionClient,
+    params: {
+      conversationId: string;
+      actorUserId: string;
+      kind: "joined" | "left";
+      changedUserIds: string[];
+    },
+  ) {
+    const updated = await tx.conversation.findUniqueOrThrow({
+      where: { id: params.conversationId },
+      include: { members: true },
+    });
+    const memberSummaries = updated.members.map((m) => ({
+      userId: m.userId,
+      role: m.role,
+      lastReadSequence: m.lastReadSequence,
+    }));
+    const base = {
+      id: updated.id,
+      type: updated.type,
+      title: updated.title,
+      memberCount: memberSummaries.length,
+      lastSequence: updated.lastSequence,
+      lastMessagePreview: null,
+      lastMessageAt: null,
+      members: memberSummaries,
+      createdAt: updated.createdAt.toISOString(),
+    };
+    const eventData =
+      params.kind === "joined"
+        ? conversationMemberJoinedDataSchema.parse({
+            ...base,
+            addedUserIds: params.changedUserIds,
+          })
+        : conversationMemberLeftDataSchema.parse({
+            ...base,
+            removedUserId: params.changedUserIds[0],
+          });
+    const eventType =
+      params.kind === "joined" ? "conversation.member-joined" : "conversation.member-left";
+    const topic =
+      params.kind === "joined"
+        ? EVENT_TOPICS.conversationMemberJoined
+        : EVENT_TOPICS.conversationMemberLeft;
+    const event = buildEventEnvelope({
+      eventType,
+      origin: { type: "user", id: params.actorUserId },
+      actor: { userId: params.actorUserId },
+      conversationId: params.conversationId,
+      data: eventData,
+    });
+    await tx.outboxEvent.create({
+      data: {
+        eventType,
+        aggregateType: "Conversation",
+        aggregateId: params.conversationId,
+        topic,
+        payload: toPrismaJson(event),
+      },
+    });
+    return updated;
   }
 
   // ---------- Message history (cursor pagination) ----------

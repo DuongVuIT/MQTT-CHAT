@@ -1,62 +1,88 @@
 import { Controller, Get, Inject, NotFoundException, Param, Query } from "@nestjs/common";
 import { PrismaService } from "../prisma.service";
+import { RedisService } from "../redis.service";
 import { apiError } from "../common";
 
 /**
- * Admin statistics endpoints (consumed by apps/admin).
- * Live event streaming is done via MQTT in the admin app; these endpoints
- * provide aggregate/persisted data.
+ * Admin statistics endpoints (consumed by the /admin dashboard).
+ * Live event streaming is done via MQTT in the dashboard; these endpoints
+ * provide aggregate/persisted data. Response shapes are the dashboard
+ * contract — nested `stats` object and per-user presence fields.
  */
 
 @Controller("admin")
 export class AdminController {
-  // Explicit token: tsx/esbuild does not emit design:paramtypes metadata.
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  // Explicit tokens: tsx/esbuild does not emit design:paramtypes metadata.
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(RedisService) private readonly redis: RedisService,
+  ) {}
 
   @Get("stats")
   async stats() {
-    const since = new Date(Date.now() - 60_000);
-    const [users, conversations, messages, messagesLastMinute, bots, outboxPending] =
+    const minuteAgo = new Date(Date.now() - 60_000);
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    const [userTotal, conversationsTotal, messagesTotal, messagesLastMinute, bots, eventsLastHour] =
       await Promise.all([
         this.prisma.user.count(),
         this.prisma.conversation.count(),
         this.prisma.message.count(),
-        this.prisma.message.count({ where: { createdAt: { gte: since } } }),
-        this.prisma.bot.findMany({ select: { id: true, name: true, enabled: true } }),
-        this.prisma.outboxEvent.count({ where: { publishedAt: null } }),
+        this.prisma.message.count({ where: { createdAt: { gte: minuteAgo } } }),
+        this.prisma.bot.findMany({ select: { enabled: true } }),
+        this.prisma.outboxEvent.count({ where: { createdAt: { gte: hourAgo } } }),
       ]);
 
+    // Online = server-authoritative Redis presence written by chat-worker.
+    const allUsers = await this.prisma.user.findMany({ select: { id: true } });
+    const presenceFlags = await Promise.all(
+      allUsers.map(async (u) => (await this.redis.presence.getPresence(u.id)).online),
+    );
+    const usersOnline = presenceFlags.filter(Boolean).length;
+
     return {
-      users,
-      conversations,
-      messages,
-      messagesPerMinute: messagesLastMinute,
-      bots,
-      outboxPending,
+      stats: {
+        users: { total: userTotal, online: usersOnline },
+        conversations: { total: conversationsTotal },
+        messages: { total: messagesTotal, perMinute: messagesLastMinute },
+        bots: {
+          total: bots.length,
+          enabled: bots.filter((b) => b.enabled).length,
+        },
+        events: { lastHour: eventsLastHour },
+      },
     };
   }
 
   @Get("users")
   async users() {
-    const users = await this.prisma.user.findMany({
+    const rows = await this.prisma.user.findMany({
       include: {
         devices: { select: { clientId: true, lastSeenAt: true } },
-        memberships: { select: { conversationId: true } },
-        messages: { orderBy: { createdAt: "desc" }, take: 1, select: { createdAt: true } },
         _count: { select: { messages: true } },
       },
     });
-    return {
-      users: users.map((u) => ({
-        id: u.id,
-        displayName: u.displayName,
-        deviceCount: u.devices.length,
-        devices: u.devices,
-        conversationCount: u.memberships.length,
-        messageCount: u._count.messages,
-        lastMessageAt: u.messages[0]?.createdAt ?? null,
-      })),
-    };
+    const enriched = await Promise.all(
+      rows.map(async (u) => {
+        const presence = await this.redis.presence.getPresence(u.id);
+        return {
+          id: u.id,
+          displayName: u.displayName,
+          online: presence.online,
+          connectionCount: presence.connectionCount,
+          devices: u.devices,
+          deviceCount: Math.max(u.devices.length, presence.connectionCount),
+          lastActivityAt:
+            u.devices
+              .map((d) => d.lastSeenAt)
+              .filter((d): d is Date => Boolean(d))
+              .sort()
+              .at(-1)
+              ?.toISOString() ?? null,
+          messagesSent: u._count.messages,
+        };
+      }),
+    );
+    return { users: enriched };
   }
 
   @Get("events")

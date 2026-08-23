@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -21,16 +22,44 @@ export interface UploadUrlParams {
   expiresIn?: number;
 }
 
+/** A stored object opened for reading (server-side streaming). */
+export interface StorageObject {
+  stream: Readable;
+  contentType?: string;
+  contentLength?: number;
+  eTag?: string;
+}
+
 export interface ObjectStorage {
-  /** Create a presigned PUT URL — binary goes client → storage directly, never via MQTT. */
+  /** Create a presigned PUT URL — server-to-server flows only. */
   createUploadUrl(params: UploadUrlParams): Promise<{ uploadUrl: string; key: string }>;
   /** Create a presigned GET (download) URL. */
   createDownloadUrl(key: string, expiresIn?: number): Promise<string>;
+  /**
+   * Open an object for server-side streaming (used by the public /media
+   * handler so clients never need object-storage hosts or signed URLs).
+   */
+  get(key: string): Promise<StorageObject>;
   upload(key: string, body: Buffer, contentType: string): Promise<void>;
   delete(key: string): Promise<void>;
   getUrl(key: string): Promise<string>;
   /** Check whether an object actually exists in storage (HEAD request). */
   exists(key: string): Promise<boolean>;
+}
+
+/**
+ * Canonical media key contract — keys are produced exclusively by
+ * {@link buildMediaKey}: `media/{conversationId}/{timestamp}-{safeName}`.
+ * Both the upload and public media endpoints enforce this strict pattern,
+ * which prevents path traversal and keeps /media from becoming a
+ * bucket-wide object minter.
+ */
+export const MEDIA_KEY_PATTERN = /^media\/[A-Za-z0-9._-]+\/[0-9]+-[A-Za-z0-9._-]+$/;
+
+/** Build a deterministic object key for a conversation upload. */
+export function buildMediaKey(conversationId: string, filename: string): string {
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `media/${conversationId}/${Date.now()}-${safeName}`;
 }
 
 export interface S3StorageConfig {
@@ -79,6 +108,18 @@ export class S3CompatibleStorage implements ObjectStorage {
     return getSignedUrl(this.s3, command, { expiresIn: expiresIn ?? this.defaultExpiresIn });
   }
 
+  async get(key: string): Promise<StorageObject> {
+    const response = await this.s3.send(
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+    );
+    return {
+      stream: response.Body as Readable,
+      contentType: response.ContentType,
+      contentLength: response.ContentLength,
+      eTag: response.ETag,
+    };
+  }
+
   async upload(key: string, body: Buffer, contentType: string): Promise<void> {
     await this.s3.send(
       new PutObjectCommand({
@@ -112,10 +153,4 @@ export class S3CompatibleStorage implements ObjectStorage {
       throw error;
     }
   }
-}
-
-/** Build a deterministic object key for a conversation upload. */
-export function buildMediaKey(conversationId: string, filename: string): string {
-  const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return `media/${conversationId}/${Date.now()}-${safeName}`;
 }
