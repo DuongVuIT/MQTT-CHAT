@@ -16,6 +16,13 @@ export const messageEventDataSchema = z.object({
   content: z.string(),
   replyToId: z.string().nullable().default(null),
   metadata: z.record(z.unknown()).nullable().default(null),
+  /**
+   * Reactions at event time. OPTIONAL on the wire (legacy outbox rows and
+   * fresh creates predate reactions) but REQUIRED after parsing — the
+   * default guarantees every consumer sees an array, never undefined.
+   * UI models must still normalize defensively at their boundary.
+   */
+  reactions: z.array(z.object({ emoji: z.string().min(1), userId: z.string().min(1) })).default([]),
   createdAt: z.string().datetime(),
 });
 export type MessageEventData = z.infer<typeof messageEventDataSchema>;
@@ -111,6 +118,23 @@ export const conversationCreatedDataSchema = z.object({
 export type ConversationCreatedData = z.infer<typeof conversationCreatedDataSchema>;
 export type ConversationCreatedEvent = EventEnvelope<ConversationCreatedData>;
 
+/**
+ * Membership-change payloads carry the FULL post-change conversation summary
+ * (same shape as conversation.created) so every client can upsert ONE entity
+ * without a refetch — plus who joined/left for targeted UI updates.
+ */
+export const conversationMemberJoinedDataSchema = conversationCreatedDataSchema.extend({
+  addedUserIds: z.array(z.string().min(1)).min(1),
+});
+export type ConversationMemberJoinedData = z.infer<typeof conversationMemberJoinedDataSchema>;
+export type ConversationMemberJoinedEvent = EventEnvelope<ConversationMemberJoinedData>;
+
+export const conversationMemberLeftDataSchema = conversationCreatedDataSchema.extend({
+  removedUserId: z.string().min(1),
+});
+export type ConversationMemberLeftData = z.infer<typeof conversationMemberLeftDataSchema>;
+export type ConversationMemberLeftEvent = EventEnvelope<ConversationMemberLeftData>;
+
 /** Map of eventType -> data schema, used by consumers for validation. */
 export const EVENT_SCHEMAS = {
   "message.created": messageEventDataSchema,
@@ -124,6 +148,8 @@ export const EVENT_SCHEMAS = {
   "presence.online": presenceEventDataSchema,
   "presence.offline": presenceEventDataSchema,
   "conversation.created": conversationCreatedDataSchema,
+  "conversation.member-joined": conversationMemberJoinedDataSchema,
+  "conversation.member-left": conversationMemberLeftDataSchema,
 } as const;
 
 export type EventType = keyof typeof EVENT_SCHEMAS;

@@ -1,9 +1,15 @@
 /**
  * Canonical MQTT topic namespace and builders.
  * NEVER hardcode topics in applications — always use these builders/constants.
+ *
+ * Environment isolation (PROJECT_STATUS §31): server-side processes may set
+ * MQTT_TOPIC_NAMESPACE to fence an E2E stack onto its own topic subtree
+ * (e.g. `chat/v1-e2e`) while sharing the broker with a running dev stack.
+ * Browsers/RN never set it — clients always speak the canonical namespace,
+ * so test traffic is invisible to real UIs by construction.
  */
 
-export const TOPIC_NAMESPACE = "chat/v1" as const;
+export const TOPIC_NAMESPACE: string = process.env["MQTT_TOPIC_NAMESPACE"] ?? "chat/v1";
 
 /** Command topics — a client/system REQUESTS something. */
 export const COMMAND_TOPICS = {

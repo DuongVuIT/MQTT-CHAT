@@ -22,6 +22,12 @@ import type { WorkerContext } from "../context";
 
 /** Map a DB message row to the canonical MessageEventData payload. */
 export function toMessageEventData(message: Message): MessageEventData {
+  // Canonical contract: reactions is ALWAYS an array. A freshly created
+  // message has none; a preloaded reactions relation is projected as-is.
+  const rawReactions = (message as { reactions?: unknown }).reactions;
+  const reactions = Array.isArray(rawReactions)
+    ? (rawReactions as { emoji: string; userId: string }[])
+    : [];
   return {
     messageId: message.id,
     clientMessageId: message.clientMessageId,
@@ -33,6 +39,7 @@ export function toMessageEventData(message: Message): MessageEventData {
     content: message.content,
     replyToId: message.replyToId,
     metadata: (message.metadata as Record<string, unknown> | null) ?? null,
+    reactions,
     createdAt: message.createdAt.toISOString(),
   };
 }
