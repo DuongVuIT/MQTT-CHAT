@@ -10,7 +10,7 @@
  * Run from repo root:  node scripts/duplicate-direct-e2e.mjs
  * (API on :3001 must be running.)
  */
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "http://localhost:3001/api";
 
 let failed = false;
 function check(ok, label, detail = "") {
@@ -66,7 +66,20 @@ WHERE c.type = 'DIRECT' AND c."directPairKey" = '${pairKey}'
 GROUP BY c.id, c."directPairKey" HAVING COUNT(*) = 2;`;
 const out = execFileSync(
   "docker",
-  ["exec", "-i", container, "psql", "-U", "mqtt", "-d", "mqtt_chat", "-t", "-A", "-c", sql],
+  [
+    "exec",
+    "-i",
+    container,
+    "psql",
+    "-U",
+    "mqtt",
+    "-d",
+    process.env.TEST_DB_NAME ?? "mqtt_chat_test", // suites run against the isolated test DB
+    "-t",
+    "-A",
+    "-c",
+    sql,
+  ],
   { encoding: "utf8" },
 );
 const rows = out

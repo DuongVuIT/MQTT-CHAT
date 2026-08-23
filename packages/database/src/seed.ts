@@ -138,6 +138,18 @@ async function main(): Promise<void> {
   await ensureDirect("conv-direct-duong-alice", "duong", "alice");
   await ensureDirect("conv-direct-bob-john", "bob", "john");
 
+  // Invariant guard: DIRECT conversations hold EXACTLY their pair (the API
+  // enforces this on create). Prune any stray membership legacy runs left
+  // behind (e.g. a bot joined to a demo pair breaks peer-relative labels).
+  for (const [id, userA, userB] of [
+    ["conv-direct-duong-alice", "duong", "alice"],
+    ["conv-direct-bob-john", "bob", "john"],
+  ] as const) {
+    await prisma.conversationMember.deleteMany({
+      where: { conversationId: id, userId: { notIn: [userA, userB] } },
+    });
+  }
+
   for (const userId of ["duong", "alice", "bob", "john"]) {
     await prisma.conversationMember.upsert({
       where: { conversationId_userId: { conversationId: general.id, userId } },

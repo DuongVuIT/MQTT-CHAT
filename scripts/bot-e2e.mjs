@@ -11,8 +11,20 @@ import { randomUUID } from "node:crypto";
 
 const mqtt = createRequire(new URL("../packages/mqtt/src/index.ts", import.meta.url))("mqtt");
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "http://localhost:3001/api";
 const MQTT_URL = process.env.MQTT_URL ?? "mqtt://localhost:1883";
+const NS = process.env.MQTT_TOPIC_NAMESPACE ?? "chat/v1"; // env-fenced E2E namespace
+
+/** Unique bot replies — QoS1 may redeliver the SAME canonical event twice. */
+const uniqueBotReplies = (events) => {
+  const seen = new Map();
+  for (const e of events) {
+    if (e.eventType === "message.created" && e.origin?.type === "bot") {
+      seen.set(e.data?.messageId ?? `${e.data?.clientMessageId}-${seen.size}`, e);
+    }
+  }
+  return [...seen.values()];
+};
 
 const conversations = await fetch(`${API}/conversations`).then((r) => r.json());
 const list = Array.isArray(conversations)
@@ -27,7 +39,7 @@ await new Promise((res, rej) => {
 });
 
 const received = [];
-client.subscribe("chat/v1/events/#", { qos: 1 });
+client.subscribe(`${NS}/events/#`, { qos: 1 });
 client.on("message", (_topic, payload) => {
   try {
     received.push(JSON.parse(payload.toString()));
@@ -44,7 +56,7 @@ function publishCommand(topic, envelope) {
 
 async function sendAsUser(content) {
   const cmid = randomUUID();
-  await publishCommand("chat/v1/commands/message/send", {
+  await publishCommand(`${NS}/commands/message/send`, {
     requestId: randomUUID(),
     commandType: "message.send",
     version: 1,
@@ -81,9 +93,7 @@ for (const cmd of ["/help", "/status", "/users", "/stats"]) {
     await sendAsUser(cmd);
     const start = Date.now();
     while (Date.now() - start < 20_000) {
-      const reply = received
-        .slice(before)
-        .find((e) => e.eventType === "message.created" && e.origin?.type === "bot");
+      const reply = uniqueBotReplies(received.slice(before))[0];
       if (reply && typeof reply.data?.content === "string" && reply.data.content.length > 0) return;
       await new Promise((r) => setTimeout(r, 200));
     }
@@ -96,9 +106,7 @@ await check("loop protection: single bot reply per command", async () => {
   const before = received.length;
   await sendAsUser("/ping");
   await new Promise((r) => setTimeout(r, 8_000));
-  const replies = received
-    .slice(before)
-    .filter((e) => e.eventType === "message.created" && e.origin?.type === "bot");
+  const replies = uniqueBotReplies(received.slice(before));
   if (replies.length !== 1) {
     throw new Error(`expected exactly 1 bot reply, got ${replies.length}`);
   }
@@ -132,9 +140,7 @@ if (!systemBot) {
       const before = received.length;
       await sendAsUser("/ping");
       await new Promise((r) => setTimeout(r, 7_000));
-      const replies = received
-        .slice(before)
-        .filter((e) => e.eventType === "message.created" && e.origin?.type === "bot");
+      const replies = uniqueBotReplies(received.slice(before));
       if (replies.length !== 0) throw new Error(`bot still replied ${replies.length}x`);
     });
 

@@ -12,8 +12,9 @@ import { randomUUID } from "node:crypto";
 // Resolve `mqtt` through the workspace package that declares it (pnpm strict layout).
 const mqtt = createRequire(new URL("../packages/mqtt/src/index.ts", import.meta.url))("mqtt");
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "http://localhost:3001/api";
 const MQTT_URL = process.env.MQTT_URL ?? "mqtt://localhost:1883";
+const NS = process.env.MQTT_TOPIC_NAMESPACE ?? "chat/v1"; // env-fenced E2E namespace
 
 const conversations = await fetch(`${API}/conversations`).then((r) => r.json());
 const list = Array.isArray(conversations)
@@ -34,7 +35,7 @@ await new Promise((res, rej) => {
 console.log("mqtt connected");
 
 const received = [];
-client.subscribe("chat/v1/events/#", { qos: 1 });
+client.subscribe(`${NS}/events/#`, { qos: 1 });
 client.on("message", (_topic, payload) => {
   try {
     received.push(JSON.parse(payload.toString()));
@@ -61,7 +62,7 @@ async function waitFor(pred, label, timeoutMs = 15_000) {
 
 // ---- Flow A: plain message ----
 const cmid = randomUUID();
-await publishCommand("chat/v1/commands/message/send", {
+await publishCommand(`${NS}/commands/message/send`, {
   requestId: randomUUID(),
   commandType: "message.send",
   version: 1,
@@ -84,7 +85,7 @@ const created = await waitFor(
 console.log("PASS flow A: message.created sequence =", created.data.sequence);
 
 // ---- Dedup check: same clientMessageId again ----
-await publishCommand("chat/v1/commands/message/send", {
+await publishCommand(`${NS}/commands/message/send`, {
   requestId: randomUUID(),
   commandType: "message.send",
   version: 1,
@@ -110,7 +111,7 @@ console.log(
 
 // ---- Flow G: bot /ping ----
 const pingCmid = randomUUID();
-await publishCommand("chat/v1/commands/message/send", {
+await publishCommand(`${NS}/commands/message/send`, {
   requestId: randomUUID(),
   commandType: "message.send",
   version: 1,

@@ -10,11 +10,12 @@
 import { createRequire } from "node:module";
 
 const mqtt = createRequire(new URL("../packages/mqtt/src/index.ts", import.meta.url))("mqtt");
+const NS = process.env.MQTT_TOPIC_NAMESPACE ?? "chat/v1"; // env-fenced E2E namespace
 // Mirrors SUBSCRIPTION_PATTERNS.allEvents from @mqtt-chat/mqtt-contracts.
-const ALL_EVENTS = "chat/v1/events/#";
+const ALL_EVENTS = `${NS}/events/#`;
 // Receipts are delivered on per-user topics (chat/v1/users/{id}/events/...),
 // which allEvents does NOT cover — subscribe to duong's user-events too.
-const USER_EVENTS = "chat/v1/users/duong/events/#";
+const USER_EVENTS = `${NS}/users/duong/events/#`;
 
 const timeoutMs = Number(process.argv[2] ?? 120) * 1000;
 const seen = new Set();

@@ -21,7 +21,7 @@ const { Redis } = (() => {
   return { Redis: ioredis.Redis ?? ioredis.default ?? ioredis };
 })();
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "http://localhost:3001/api";
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 
 // Recipient must be OFFLINE (no MQTT connection) for a push to fire.
@@ -58,6 +58,7 @@ if (info?.online) {
 console.log(`precondition OK: ${RECIPIENT} offline`);
 
 const mqtt = createRequire(new URL("../packages/mqtt/src/index.ts", import.meta.url))("mqtt");
+const NS = process.env.MQTT_TOPIC_NAMESPACE ?? "chat/v1"; // env-fenced E2E namespace
 const client = mqtt.connect(process.env.MQTT_URL ?? "mqtt://localhost:1883", {
   clientId: `${SENDER}:notify-e2e-${Date.now()}`,
   clean: true,
@@ -68,7 +69,7 @@ await new Promise((res, rej) => {
 });
 
 const received = [];
-client.subscribe("chat/v1/events/#", { qos: 1 });
+client.subscribe(`${NS}/events/#`, { qos: 1 });
 client.on("message", (_topic, payload) => {
   try {
     received.push(JSON.parse(payload.toString()));
@@ -81,7 +82,7 @@ const preview = `notify-e2e-${randomUUID().slice(0, 8)}`;
 const cmid = randomUUID();
 await new Promise((res, rej) =>
   client.publish(
-    "chat/v1/commands/message/send",
+    `${NS}/commands/message/send`,
     JSON.stringify({
       requestId: randomUUID(),
       commandType: "message.send",

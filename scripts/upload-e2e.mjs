@@ -1,8 +1,10 @@
 /**
- * Media upload E2E: presign → PUT to MinIO → complete.
+ * Media upload E2E — SINGLE ORIGIN flow.
+ *   POST /api/uploads (multipart) → durable storageKey
+ *   GET  /api/media?key=<key>     → streams bytes back with correct Content-Type
  * Run from repo root:  node scripts/upload-e2e.mjs
  */
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "http://localhost:3001/api";
 
 const conversations = await fetch(`${API}/conversations`).then((r) => r.json());
 const list = Array.isArray(conversations)
@@ -16,56 +18,55 @@ const PNG = Buffer.from(
   "base64",
 );
 
-const presign = await fetch(`${API}/uploads/presign`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    conversationId: general.id,
-    filename: "upload-e2e.png",
-    contentType: "image/png",
-    sizeBytes: PNG.length,
-  }),
-}).then((r) => r.json());
-
-if (!presign.uploadUrl || !presign.key) {
-  console.log("FAIL presign:", JSON.stringify(presign));
+// 1) Same-origin multipart upload through the API (no presigned URL involved).
+const form = new FormData();
+form.append("conversationId", general.id);
+form.append("file", new Blob([PNG], { type: "image/png" }), "upload-e2e.png");
+const uploaded = await fetch(`${API}/uploads`, { method: "POST", body: form });
+const uploadBody = await uploaded.json();
+if (!uploaded.ok || !uploadBody.key) {
+  console.log("FAIL upload:", JSON.stringify(uploadBody));
   process.exit(1);
 }
-console.log("PASS presign, key =", presign.key);
+const key = uploadBody.key;
+console.log("PASS upload, key =", key);
 
-const put = await fetch(presign.uploadUrl, {
-  method: "PUT",
-  headers: { "content-type": "image/png" },
-  body: PNG,
-});
-console.log(put.ok ? "PASS PUT to MinIO" : `FAIL PUT: ${put.status}`);
-if (!put.ok) process.exit(1);
-
-const complete = await fetch(`${API}/uploads/complete`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ conversationId: general.id, key: presign.key }),
-});
-const body = await complete.json();
+// 2) Public media path streams the object back byte-perfect.
+const mediaRes = await fetch(`${API.replace(/\/api$/, "")}/media?key=${encodeURIComponent(key)}`);
+if (!mediaRes.ok) {
+  console.log(`FAIL media GET: ${mediaRes.status}`);
+  process.exit(1);
+}
+if (mediaRes.headers.get("content-type") !== "image/png") {
+  console.log(`FAIL content-type: ${mediaRes.headers.get("content-type")}`);
+  process.exit(1);
+}
+const bytes = Buffer.from(await mediaRes.arrayBuffer());
 console.log(
-  complete.ok && body.ok
-    ? "PASS complete (object verified in storage)"
-    : `FAIL complete: ${complete.status} ${JSON.stringify(body)}`,
+  bytes.equals(PNG)
+    ? "PASS media stream (content-type image/png, byte round-trip)"
+    : "FAIL media bytes differ",
+);
+if (!bytes.equals(PNG)) process.exit(1);
+
+// 3) Negative checks: invalid key shape → 404; unsupported type → rejected.
+const negativeMedia = await fetch(
+  `${API.replace(/\/api$/, "")}/media?key=${encodeURIComponent("../../etc/passwd")}`,
+);
+console.log(
+  negativeMedia.status === 404 || negativeMedia.status === 400
+    ? "PASS negative: traversal-shaped key rejected"
+    : `FAIL negative key accepted: ${negativeMedia.status}`,
 );
 
-// Negative check: complete with a key that was never uploaded must fail.
-const negative = await fetch(`${API}/uploads/complete`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({
-    conversationId: general.id,
-    key: "media/conv-general/never-uploaded.png",
-  }),
-});
+const badForm = new FormData();
+badForm.append("conversationId", general.id);
+badForm.append("file", new Blob([Buffer.from("hello")], { type: "text/plain" }), "note.txt");
+const badType = await fetch(`${API}/uploads`, { method: "POST", body: badForm });
 console.log(
-  negative.status === 404
-    ? "PASS negative: unknown key rejected with 404"
-    : `FAIL negative: ${negative.status}`,
+  badType.status === 400
+    ? "PASS negative: unsupported content type rejected"
+    : `FAIL unsupported type accepted: ${badType.status}`,
 );
 
 process.exit(0);

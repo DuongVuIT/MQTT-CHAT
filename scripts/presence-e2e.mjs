@@ -16,8 +16,9 @@ import { randomUUID } from "node:crypto";
 
 const mqtt = createRequire(new URL("../packages/mqtt/src/index.ts", import.meta.url))("mqtt");
 
-const API = process.env.API_URL ?? "http://localhost:3001";
+const API = process.env.API_URL ?? "http://localhost:3001/api";
 const MQTT_URL = process.env.MQTT_URL ?? "mqtt://localhost:1883";
+const NS = process.env.MQTT_TOPIC_NAMESPACE ?? "chat/v1"; // env-fenced E2E namespace
 const USER = process.env.PRESENCE_USER ?? "duong";
 
 function connectDevice(deviceId) {
@@ -35,7 +36,7 @@ function connectDevice(deviceId) {
       clean: true,
       keepalive: 30,
       will: {
-        topic: "chat/v1/commands/presence/set",
+        topic: `${NS}/commands/presence/set`,
         payload: JSON.stringify(willEnvelope),
         qos: 1,
         retain: false,
@@ -49,7 +50,7 @@ function connectDevice(deviceId) {
 function publishPresence(client, deviceId, isOnline) {
   return new Promise((res, rej) =>
     client.publish(
-      "chat/v1/commands/presence/set",
+      `${NS}/commands/presence/set`,
       JSON.stringify({
         requestId: randomUUID(),
         commandType: "presence.set",
