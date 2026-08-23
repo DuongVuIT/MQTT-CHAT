@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: mqtt-chat-postgres
+    environment:
+      POSTGRES_USER: mqtt
+      POSTGRES_PASSWORD: mqtt
+      POSTGRES_DB: mqtt_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mqtt -d mqtt_chat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: mqtt-chat-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  emqx:
+    image: emqx/emqx:5.8
+    container_name: mqtt-chat-emqx
+    environment:
+      EMQX_NAME: mqtt-chat
+      EMQX_HOST: 127.0.0.1
+      # Demo platform: anonymous MQTT connections are intentional (no auth).
+      EMQX_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "1883:1883" # MQTT TCP
+      - "8083:8083" # MQTT WebSocket
+      - "18083:18083" # Dashboard (admin/public)
+    volumes:
+      - emqx-data:/opt/emqx/data
+    healthcheck:
+      test: ["CMD", "emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    container_name: mqtt-chat-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: mqtt-chat-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/mqtt-chat-media &&
+      echo 'Bucket mqtt-chat-media ready'
+      "
+
+volumes:
+  postgres-data:
+  redis-data:
+  emqx-data:
+  minio-data:

@@ -1,0 +1,4 @@
+{
+  "extends": "../../tooling/typescript/react-library.json",
+  "include": ["src"]
+}

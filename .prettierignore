@@ -1,0 +1,13 @@
+node_modules
+.next
+.turbo
+dist
+build
+coverage
+apps/mobile/android/build
+apps/mobile/android/app/build
+apps/mobile/android/.gradle
+apps/mobile/android/app/.cxx
+apps/mobile/ios/Pods
+apps/mobile/ios/build
+pnpm-lock.yaml

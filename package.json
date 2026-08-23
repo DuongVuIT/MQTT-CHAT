@@ -1,0 +1,48 @@
+{
+  "name": "mqtt-chat",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "test:e2e": "node scripts/smoke.mjs && node scripts/bot-e2e.mjs",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml,mjs}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yml,yaml,mjs}\"",
+    "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "verify:all": "pnpm validate && pnpm test:e2e",
+    "verify:completion": "node scripts/check-project-status.mjs",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "db:migrate": "pnpm --filter @mqtt-chat/database db:migrate",
+    "db:seed": "pnpm --filter @mqtt-chat/database db:seed",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.26.0",
+    "eslint": "^9.26.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.5.3",
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.32.0",
+    "vitest": "^3.1.3"
+  }
+}

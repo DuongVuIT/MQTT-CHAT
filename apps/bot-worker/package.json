@@ -1,0 +1,28 @@
+{
+  "name": "@mqtt-chat/bot-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'no tests' && exit 0",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@mqtt-chat/bot-rules": "workspace:*",
+    "@mqtt-chat/bot-sdk": "workspace:*",
+    "@mqtt-chat/config": "workspace:*",
+    "@mqtt-chat/database": "workspace:*",
+    "@mqtt-chat/logger": "workspace:*",
+    "@mqtt-chat/mqtt": "workspace:*",
+    "@mqtt-chat/mqtt-contracts": "workspace:*",
+    "@mqtt-chat/redis": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

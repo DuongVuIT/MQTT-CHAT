@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Chat domain ----------
+
+model User {
+  id          String   @id
+  displayName String
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  devices       Device[]
+  memberships   ConversationMember[]
+  messages      Message[]
+  reactions     MessageReaction[]
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  clientId   String   @unique // e.g. "duong:web-01"
+  platform   String   @default("web")
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Conversation {
+  id            String           @id @default(cuid())
+  type          ConversationType
+  // Canonical uniqueness key for DIRECT conversations:
+  // sorted "userIdA:userIdB" (see directPairKeyFor). Null for GROUP.
+  // Enforced by a UNIQUE index so concurrent creates can never produce
+  // two direct conversations for the same user pair.
+  directPairKey String?          @unique
+  title         String?
+  createdBy     String
+  lastSequence  Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  members   ConversationMember[]
+  messages  Message[]
+  reactions MessageReaction[]
+
+  @@index([type])
+}
+
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+model ConversationMember {
+  conversationId        String
+  userId                String
+  role                  MemberRole @default(MEMBER)
+  lastReadSequence      Int        @default(0)
+  lastDeliveredSequence Int        @default(0)
+  joinedAt              DateTime   @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
+}
+
+enum MemberRole {
+  MEMBER
+  ADMIN
+}
+
+model Message {
+  id              String      @id @default(cuid())
+  clientMessageId String      @unique // idempotency key (dedup for QoS1 redelivery)
+  conversationId  String
+  senderId        String
+  senderType      SenderType
+  sequence        Int
+  type            MessageType
+  content         String      @default("")
+  replyToId       String?
+  metadata        Json?
+  createdAt       DateTime    @default(now())
+  editedAt        DateTime?
+  deletedAt       DateTime?
+
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User               @relation(fields: [senderId], references: [id])
+  replyTo      Message?           @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      Message[]          @relation("MessageReplies")
+  reactions    MessageReaction[]
+
+  @@unique([conversationId, sequence]) // monotonic per-conversation ordering
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+}
+
+enum SenderType {
+  USER
+  BOT
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+  VOICE
+  SYSTEM
+}
+
+model MessageReaction {
+  messageId      String
+  userId         String
+  emoji          String
+  conversationId String
+  createdAt      DateTime @default(now())
+
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, emoji])
+  @@index([conversationId])
+}
+
+// ---------- Transactional outbox ----------
+
+model OutboxEvent {
+  id           String    @id @default(cuid())
+  eventType    String
+  aggregateType String
+  aggregateId  String
+  payload      Json
+  topic        String
+  createdAt    DateTime  @default(now())
+  publishedAt  DateTime?
+  attemptCount Int       @default(0)
+  lastError    String?
+
+  @@index([publishedAt, createdAt])
+}
+
+// ---------- Bot system ----------
+
+model Bot {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  enabled   Boolean  @default(true)
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rules          BotRule[]
+  eventLogs      BotEventLog[]
+  commandLogs    BotCommandLog[]
+  executionLogs  BotExecutionLog[]
+  scheduledJobs  BotScheduledJob[]
+}
+
+model BotRule {
+  id          String   @id @default(cuid())
+  botId       String
+  name        String
+  description String   @default("")
+  trigger     Json
+  conditions  Json     @default("[]")
+  actions     Json     @default("[]")
+  priority    Int      @default(100) // lower runs first
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId, enabled, priority])
+}
+
+model BotEventLog {
+  id             String   @id @default(cuid())
+  botId          String
+  eventType      String
+  eventId        String
+  payload        Json
+  matchedRuleIds String[] @default([])
+  processedAt    DateTime @default(now())
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId, processedAt])
+  @@index([eventType])
+}
+
+model BotCommandLog {
+  id          String   @id @default(cuid())
+  botId       String
+  command     String
+  args        String[] @default([])
+  userId      String
+  conversationId String
+  success     Boolean
+  response    String?
+  executedAt  DateTime @default(now())
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId, executedAt])
+}
+
+model BotExecutionLog {
+  id            String   @id @default(cuid())
+  botId         String
+  ruleId        String?
+  actionType    String
+  status        BotExecutionStatus
+  input         Json?
+  output        Json?
+  error         String?
+  correlationId String?
+  causationId   String?
+  executedAt    DateTime @default(now())
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId, executedAt])
+}
+
+enum BotExecutionStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model BotScheduledJob {
+  id            String   @id @default(cuid())
+  botId         String
+  runAt         DateTime
+  recurring     Boolean  @default(false)
+  intervalMs    Int?
+  payload       Json
+  status        BotJobStatus @default(PENDING)
+  attempts      Int      @default(0)
+  lastError     String?
+  createdAt     DateTime @default(now())
+  completedAt   DateTime?
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+}
+
+enum BotJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
