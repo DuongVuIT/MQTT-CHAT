@@ -17,13 +17,13 @@ pnpm db:seed                  # users, conversations, bot + rules
 pnpm dev                      # all apps with hot reload
 ```
 
-| URL                          | What                          |
-| ---------------------------- | ----------------------------- |
-| http://localhost:3000        | Chat app                      |
-| http://localhost:3001/health | API health                    |
-| http://localhost:3002        | Admin dashboard               |
-| http://localhost:18083       | EMQX dashboard (admin/public) |
-| http://localhost:9001        | MinIO console                 |
+| URL                              | What                          |
+| -------------------------------- | ----------------------------- |
+| http://localhost:3000            | Chat app (gateway origin)     |
+| http://localhost:3000/admin      | Admin dashboard               |
+| http://localhost:3000/api/health | API health                    |
+| http://localhost:18083           | EMQX dashboard (admin/public) |
+| http://localhost:9001            | MinIO console                 |
 
 ## Scripts
 
@@ -38,7 +38,7 @@ pnpm db:seed       # seed data
 docker compose up -d / down   # infra lifecycle
 ```
 
-Run a single app: `pnpm --filter web dev`, `pnpm --filter api start:dev`, etc.
+Run a single app: `pnpm --filter @mqtt-chat/web dev`, `pnpm --filter @mqtt-chat/api dev`, etc.
 
 ## Environment Variables
 
@@ -47,14 +47,14 @@ a missing/invalid variable fails fast with a clear error.
 
 ## Ports
 
-web 3000 · api 3001 · admin 3002 · MQTT TCP 1883 · MQTT WS 8083 · EMQX dash 18083 · PG 5432 · Redis 6379 · MinIO 9000/9001
+gateway 3000 (public) · web 3100 + api 3001 (internal) · MQTT TCP 1883 · MQTT WS 8083 · EMQX dash 18083 · PG 5432 · Redis 6379 · MinIO 9000/9001
 
 ## Troubleshooting
 
-| Problem                           | Fix                                                                              |
-| --------------------------------- | -------------------------------------------------------------------------------- |
-| Web can't connect to MQTT         | Ensure EMQX container is up; check `NEXT_PUBLIC_MQTT_WS_URL=ws://localhost:8083` |
-| API errors "P1001 can't reach DB" | Start postgres container; wait for healthcheck                                   |
-| Bot doesn't reply                 | Check bot enabled + rule enabled in Admin → Bot; check bot-worker logs           |
-| No notifications in logs          | Recipient must be offline (close their tabs) when message arrives                |
-| Messages duplicated in UI         | Should not happen — dedupe by clientMessageId/eventId; report as bug             |
+| Problem                           | Fix                                                                                                              |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Web can't connect to MQTT         | Ensure EMQX container is up; browsers use the same-origin gateway path ws://<host>/mqtt (no direct :8083 needed) |
+| API errors "P1001 can't reach DB" | Start postgres container; wait for healthcheck                                                                   |
+| Bot doesn't reply                 | Check bot enabled + rule enabled in Admin → Bot; check bot-worker logs                                           |
+| No notifications in logs          | Recipient must be offline (close their tabs) when message arrives                                                |
+| Messages duplicated in UI         | Should not happen — dedupe by clientMessageId/eventId; report as bug                                             |

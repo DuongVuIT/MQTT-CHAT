@@ -51,11 +51,12 @@ reconnect
 ## Media
 
 ```
-POST /uploads/presign { filename, mimeType, size } → presigned PUT URL
-Client uploads binary directly to MinIO/R2
-POST /uploads/complete → media/uploaded event
-MQTT message carries metadata only: url, mimeType, size, filename, width/height/duration
+POST /api/uploads (multipart, same-origin via gateway) → server persists to MinIO → durable storageKey
+MQTT message carries mediaUrl = /media?key=<storageKey> + mimeType, size, filename
+GET /media?key=… → API streams the object server-side (immutable cache headers)
 ```
+
+Keys are durable and resolved at READ time — no stale signed URLs can exist.
 
 ## Idempotency Guarantees
 

@@ -69,4 +69,4 @@ All message-producing actions go through `bot.send` commands → chat-worker →
 | delayed   | contains "wait"     | delayed reply after ~2s   |
 | name-flow | `/start-flow`       | 2-step session state demo |
 
-Toggle any rule from Admin (:3002) → Bot tab.
+Toggle any rule from Admin (`http://localhost:3000/admin`) → Bot tab.

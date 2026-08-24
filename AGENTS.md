@@ -33,7 +33,7 @@ Users are picked in the UI (`duong | alice | bob | john`); identity = `userId:de
 ## Key Architecture Facts
 
 - Monorepo: pnpm workspace + Turborepo, TypeScript strict, Node 22 LTS.
-- Apps: `web` (3000), `api` (3001), `admin` (3002), `chat-worker`, `bot-worker`, `notification-worker`.
+- Apps: `gateway` (:3000 — the SINGLE public origin: `/`, `/chat`, `/admin`, `/api/*`, `/media*`, ws `/mqtt`), `web` (:3100 internal), `api` (:3001 internal), `chat-worker`, `bot-worker`, `notification-worker`. Admin is a route (`/admin`) inside web, not a separate app.
 - Infra: EMQX (1883 TCP / 8083 WS), PostgreSQL (5432), Redis (6379), MinIO (9000/9001) via docker-compose.
 - Topic namespace: `chat/v1/...` — see `packages/mqtt-contracts/src/topics.ts`.
 - Event envelope: versioned, schema-validated, with actor/origin/correlation/causation.
