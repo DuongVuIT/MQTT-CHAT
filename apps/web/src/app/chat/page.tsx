@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type ApiConversation } from "@/lib/api";
+import { api, type ApiConversation, type ApiMessage } from "@/lib/api";
 import { normalizeConversation, normalizeMessage } from "@mqtt-chat/realtime-core";
 import { getRealtimeService, type ConnectionState } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
@@ -27,6 +27,14 @@ export default function ChatPage() {
   // Previous transport state — used to detect reconnect transitions
   // (reconnecting/disconnected → connected) and trigger state recovery.
   const prevConnectionState = useRef<ConnectionState | null>(null);
+  // Reply target for the composer — canonical messageId of an existing message.
+  const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
+  const activeConversationId = store.activeConversationId;
+
+  // Switching conversations must never carry a stale reply target over.
+  useEffect(() => {
+    setReplyTo(null);
+  }, [activeConversationId]);
 
   // Bootstrap: identity → REST data → MQTT connect → subscriptions.
   useEffect(() => {
@@ -141,8 +149,12 @@ export default function ChatPage() {
               </div>
               <ConnectionBadge state={store.connectionState} />
             </header>
-            <MessageList conversationId={activeConversation.id} />
-            <Composer conversationId={activeConversation.id} />
+            <MessageList conversationId={activeConversation.id} onRequestReply={setReplyTo} />
+            <Composer
+              conversationId={activeConversation.id}
+              replyTo={replyTo}
+              onCancelReply={() => setReplyTo(null)}
+            />
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center text-slate-400">
@@ -290,6 +302,16 @@ function handleEvent(envelope: EventEnvelope): void {
     case "message.deleted":
       s.removeMessage(String(data["messageId"]));
       break;
+    case "message.rejected": {
+      // Authority rejected the send — fail the optimistic entry NOW instead
+      // of waiting out the reconciliation timeout (repair-log #27).
+      const rejectedCmid = String(data["clientMessageId"] ?? "");
+      if (rejectedCmid) {
+        s.markPendingFailed(rejectedCmid);
+        s.setError(`Message rejected: ${String(data["reason"] ?? "unknown reason")}`);
+      }
+      break;
+    }
     case "reaction.added":
       s.toggleReaction(String(data["messageId"]), String(data["emoji"]), String(data["userId"]));
       break;

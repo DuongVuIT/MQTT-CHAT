@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
 import { MessageBubble } from "@/components/MessageBubble";
@@ -18,7 +18,14 @@ import { Spinner, EmptyState } from "@mqtt-chat/ui";
 // infinite re-render loop in useSyncExternalStore.
 const NO_TYPING_USERS: string[] = [];
 
-export function MessageList({ conversationId }: { conversationId: string }) {
+export function MessageList({
+  conversationId,
+  onRequestReply,
+}: {
+  conversationId: string;
+  /** Raise a reply intent to the page (composer reply target). */
+  onRequestReply?: (message: ApiMessage) => void;
+}) {
   const messages = useChatStore((s) => s.messagesByConversation[conversationId]);
   const pending = useChatStore((s) => s.pendingMessages);
   const typing = useChatStore((s) => s.typingUsers[conversationId] ?? NO_TYPING_USERS);
@@ -107,6 +114,9 @@ export function MessageList({ conversationId }: { conversationId: string }) {
     [pending, conversationId],
   );
 
+  // Reply-source resolution for quoted previews (id → canonical message).
+  const byId = useMemo(() => new Map((messages ?? []).map((m) => [m.id, m])), [messages]);
+
   if (loadingInitial) {
     return (
       <div className="flex flex-1 items-center justify-center" aria-label="Loading messages">
@@ -156,7 +166,13 @@ export function MessageList({ conversationId }: { conversationId: string }) {
         )}
 
         {(messages ?? []).map((m) => (
-          <MessageBubble key={m.id} message={m} isOwn={m.senderId === identity?.userId} />
+          <MessageBubble
+            key={m.id}
+            message={m}
+            isOwn={m.senderId === identity?.userId}
+            replySource={m.replyToId ? (byId.get(m.replyToId) ?? null) : null}
+            onReply={onRequestReply}
+          />
         ))}
 
         {pendingForConversation.map((p) => (

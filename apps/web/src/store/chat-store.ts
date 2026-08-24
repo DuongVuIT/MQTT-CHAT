@@ -12,6 +12,13 @@ export interface PendingMessage {
   conversationId: string;
   content: string;
   replyToId: string | null;
+  /**
+   * Canonical message type + media metadata, carried so RETRY republishes the
+   * exact same logical message (repair-log #27: retry used to downgrade
+   * replies to plain text and lose their target).
+   */
+  type?: string;
+  metadata?: unknown;
   /** queued = offline, waiting for reconnect; pending = published, awaiting ack. */
   status: "queued" | "pending" | "failed";
 }

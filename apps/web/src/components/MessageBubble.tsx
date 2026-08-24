@@ -4,6 +4,7 @@ import { memo, useState } from "react";
 import { mediaViewUrl, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
+import { retryPendingMessage } from "@/components/Composer";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "🎉"] as const;
 
@@ -35,10 +36,16 @@ export const MessageBubble = memo(function MessageBubble({
   message,
   pending,
   isOwn,
+  replySource,
+  onReply,
 }: {
   message?: ApiMessage;
   pending?: PendingProps;
   isOwn: boolean;
+  /** Resolved target for this message's quoted preview (null when not a reply). */
+  replySource?: ApiMessage | null;
+  /** Raise a reply intent — provided by the page via MessageList. */
+  onReply?: (message: ApiMessage) => void;
 }) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -68,11 +75,8 @@ export const MessageBubble = memo(function MessageBubble({
                 type="button"
                 aria-label="Retry send"
                 onClick={() => {
-                  getRealtimeService().publishCommand("message.send", {
-                    conversationId: useChatStore.getState().activeConversationId,
-                    clientMessageId: pending.clientMessageId,
-                    content: pending.content,
-                  });
+                  // Faithful retry — same clientMessageId + full payload.
+                  retryPendingMessage(pending.clientMessageId);
                 }}
                 className="ml-1 underline"
               >
@@ -145,6 +149,25 @@ export const MessageBubble = memo(function MessageBubble({
           } ${deleted ? "italic opacity-60" : ""}`}
           data-testid={isOwn ? "own-message" : "other-message"}
         >
+          {/* Quoted reply preview — never raw IDs (#57). */}
+          {!editing && replySource && (
+            <div
+              className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 text-xs ${
+                isOwn
+                  ? "border-indigo-200 bg-indigo-500/30 text-indigo-50"
+                  : "border-indigo-400 bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300"
+              }`}
+            >
+              <p className="font-medium">{replySource.senderName}</p>
+              <p className="truncate opacity-80">
+                {replySource.deletedAt
+                  ? "Message deleted"
+                  : replySource.type === "TEXT" || !replySource.metadata
+                    ? replySource.content || "(empty)"
+                    : `📎 ${String(replySource.metadata["filename"] ?? "Attachment")}`}
+              </p>
+            </div>
+          )}
           {editing ? (
             <span className="flex items-center gap-2">
               <input
@@ -232,6 +255,17 @@ export const MessageBubble = memo(function MessageBubble({
             >
               😊+
             </button>
+            {onReply && (
+              <button
+                type="button"
+                aria-label="Reply to message"
+                data-testid="reply-action"
+                onClick={() => onReply(message)}
+                className="rounded px-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                ↩ Reply
+              </button>
+            )}
             {isOwn && (
               <>
                 <button

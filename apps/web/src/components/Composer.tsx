@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
 
@@ -51,6 +51,9 @@ export function publishOrQueueSend(body: {
     conversationId: body.conversationId,
     content: body.pendingContent ?? body.content,
     replyToId: body.replyToId,
+    // Carry the full logical payload so RETRY republishes it faithfully.
+    type: body.type,
+    metadata: body.metadata,
     status: isConnected() ? "pending" : "queued",
   });
   if (isConnected()) {
@@ -63,7 +66,8 @@ export function publishOrQueueSend(body: {
 
 /**
  * Retry a failed/queued pending message. Re-publishes the SAME
- * clientMessageId — chat-worker dedupes by it, so retries are idempotent.
+ * clientMessageId AND the same logical payload (type/reply/metadata) —
+ * chat-worker dedupes by clientMessageId, so retries are idempotent.
  * Exported for the retry button rendered next to failed bubbles.
  */
 export function retryPendingMessage(clientMessageId: string): void {
@@ -74,10 +78,11 @@ export function retryPendingMessage(clientMessageId: string): void {
   getRealtimeService().publishCommand("message.send", {
     conversationId: pending.conversationId,
     clientMessageId,
-    content: pending.content.startsWith("📎") ? "" : pending.content,
-    type: pending.content.startsWith("📎") ? "FILE" : "TEXT",
-    replyToId: null,
-    metadata: null,
+    // Legacy pendings (pre-type-field) keep the historical 📎 heuristic.
+    content: pending.type === undefined && pending.content.startsWith("📎") ? "" : pending.content,
+    type: pending.type ?? (pending.content.startsWith("📎") ? "FILE" : "TEXT"),
+    replyToId: pending.replyToId,
+    metadata: pending.metadata ?? null,
   });
   armSendTimeout(clientMessageId);
 }
@@ -87,7 +92,16 @@ export function retryPendingMessage(clientMessageId: string): void {
  * publishing (debounced stop), file upload via presigned URL (metadata over MQTT).
  */
 
-export function Composer({ conversationId }: { conversationId: string }) {
+export function Composer({
+  conversationId,
+  replyTo,
+  onCancelReply,
+}: {
+  conversationId: string;
+  /** Current reply target (quoted preview above the input). */
+  replyTo?: ApiMessage | null;
+  onCancelReply?: () => void;
+}) {
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const identity = useChatStore((s) => s.identity);
@@ -123,9 +137,11 @@ export function Composer({ conversationId }: { conversationId: string }) {
       clientMessageId: crypto.randomUUID(),
       content,
       type: "TEXT",
-      replyToId: null,
+      // Canonical reply relation — the target's messageId (#17).
+      replyToId: replyTo?.id ?? null,
       metadata: null,
     });
+    onCancelReply?.();
   };
 
   const uploadFile = async (file: File): Promise<void> => {
@@ -163,6 +179,31 @@ export function Composer({ conversationId }: { conversationId: string }) {
 
   return (
     <footer className="border-t border-slate-200 p-3 dark:border-slate-800">
+      {replyTo && !replyTo.deletedAt && (
+        <div
+          className="mb-2 flex items-center justify-between gap-2 rounded-lg border-l-2 border-indigo-400 bg-slate-100 px-3 py-1.5 text-xs dark:bg-slate-800"
+          data-testid="reply-banner"
+        >
+          <div className="min-w-0">
+            <p className="font-medium text-slate-600 dark:text-slate-300">
+              Replying to {replyTo.senderName}
+            </p>
+            <p className="truncate text-slate-500 dark:text-slate-400">
+              {replyTo.type === "TEXT" || !replyTo.metadata
+                ? replyTo.content || "(empty)"
+                : `📎 ${String(replyTo.metadata["filename"] ?? "Attachment")}`}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Cancel reply"
+            onClick={onCancelReply}
+            className="rounded px-1.5 py-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-700"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="flex items-end gap-2">
         <label className="cursor-pointer rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">
           <span aria-hidden>📎</span>
