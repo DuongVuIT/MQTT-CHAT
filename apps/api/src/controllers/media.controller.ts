@@ -54,6 +54,17 @@ export class MediaController {
     }
     // Immutable keys → content never changes for a given key.
     res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    // A storage fault mid-stream must not surface as an unhandled 'error'
+    // event (that would crash the whole API process), and a client abort
+    // must not leave the upstream storage socket open.
+    res.on("close", () => {
+      object.stream.destroy();
+    });
+    object.stream.on("error", () => {
+      // Headers are already sent — the only safe recovery is tearing down
+      // the response; the client sees a truncated body instead of a crash.
+      res.destroy();
+    });
     object.stream.pipe(res);
   }
 }
