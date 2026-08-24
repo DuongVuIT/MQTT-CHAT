@@ -226,7 +226,10 @@ try {
         else if (document.body.innerText.includes("message.created")) {
           // Wait out the settle window so an event already in flight cannot
           // be mistaken for ours; whatever remains after 1.5s is baseline.
-          setTimeout(() => resolve(document.body.innerText.split("message.created").length - 1), 1500);
+          setTimeout(
+            () => resolve(document.body.innerText.split("message.created").length - 1),
+            1500,
+          );
         } else setTimeout(tick, 400);
       };
       tick();
