@@ -18,6 +18,14 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
+// ---- Env immunity (#42): an operator shell often carries development
+// credentials (DATABASE_URL/REDIS_URL from a sourced .env). The isolated
+// stack must NEVER inherit them — every child gets explicit values below,
+// so drop any inherited connection state before spawning anything.
+for (const inherited of ["DATABASE_URL", "REDIS_URL", "MQTT_TOPIC_NAMESPACE"]) {
+  delete process.env[inherited];
+}
+
 const TEST_DB =
   process.env.TEST_DATABASE_URL ??
   "postgresql://mqtt:mqtt@localhost:5432/mqtt_chat_test?schema=public";
@@ -26,6 +34,33 @@ const TEST_API = `http://localhost:${TEST_API_PORT}/api`;
 const TEST_REDIS = process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1";
 /** Topic-subtree fence: E2E traffic never mixes with a live dev broker. */
 const TEST_NS = process.env.TEST_MQTT_NAMESPACE ?? "chat/v1-e2e";
+
+// ---- Safety guard (#42): refuse configurations that would test against the
+// DEVELOPMENT database. The whole point of the isolated stack is that
+// automated suites can NEVER pollute (or be polluted by) dev data.
+{
+  const dbPath = (() => {
+    try {
+      return new URL(TEST_DB).pathname.replace(/^\//, "");
+    } catch {
+      return TEST_DB;
+    }
+  })();
+  if (/mqtt_chat(\?|$|\/$)/.test(dbPath) && !dbPath.startsWith("mqtt_chat_test")) {
+    console.error(
+      `[test-stack] REFUSING to start: TEST_DATABASE_URL points at the development database (${dbPath}).\n` +
+        `             Use the isolated mqtt_chat_test DB or override TEST_DATABASE_URL explicitly.`,
+    );
+    process.exit(1);
+  }
+  if (!TEST_DB.includes("mqtt_chat_test") && process.env.ALLOW_UNSAFE_TEST_DB !== "1") {
+    console.error(
+      `[test-stack] REFUSING to start: TEST_DATABASE_URL does not look like an isolated test DB (${dbPath}).\n` +
+        `             Set ALLOW_UNSAFE_TEST_DB=1 only if you REALLY know what you are doing.`,
+    );
+    process.exit(1);
+  }
+}
 
 const children = [];
 /** Resolved when a service logs its readiness marker (workers → MQTT wired). */
@@ -100,12 +135,15 @@ async function ensureTestDatabase() {
 
 async function migrateAndSeed() {
   console.log("[test-stack] migrating + seeding mqtt_chat_test…");
+  if (process.env.DEBUG_STACK_ENV === "1") {
+    console.error(`[debug-mms] pre-spawn TEST_DB=${JSON.stringify(TEST_DB)}`);
+  }
   run("pnpm", ["--filter", "@mqtt-chat/database", "exec", "prisma", "migrate", "deploy"], {
-    DATABASE_URL: TEST_DB,
+    env: { DATABASE_URL: TEST_DB },
   });
   await waitFor(children[children.length - 1], "prisma migrate");
   run("pnpm", ["--filter", "@mqtt-chat/database", "exec", "tsx", "src/seed.ts"], {
-    DATABASE_URL: TEST_DB,
+    env: { DATABASE_URL: TEST_DB },
   });
   await waitFor(children[children.length - 1], "seed");
 }
