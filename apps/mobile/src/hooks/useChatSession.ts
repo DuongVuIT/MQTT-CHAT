@@ -6,6 +6,11 @@ import {
   type RealtimeEvent,
 } from '@mqtt-chat/realtime-core';
 import {
+  applyConversationEvent,
+  applyMessageActivity,
+  type ConversationEventTypeName,
+} from '../features/conversations/conversation-events';
+import {
   api,
   type ApiConversation,
   type ApiMessage,
@@ -97,10 +102,10 @@ export function useChatSession(identity: Identity | null) {
         await clientRef.current?.sendMessage({
           conversationId: p.conversationId,
           clientMessageId: p.clientMessageId,
-          type: 'TEXT',
+          type: p.type ?? 'TEXT',
           content: p.content,
           replyToId: p.replyToId,
-          metadata: null,
+          metadata: p.metadata ?? null,
         });
       },
       10_000,
@@ -112,7 +117,27 @@ export function useChatSession(identity: Identity | null) {
 
     const handleEvent = (ev: RealtimeEvent): void => {
       const data = ev.data ?? {};
+      // The client (and this handler) is recreated per identity — no stale
+      // identity closure is possible here.
+      const selfUserId = identity?.userId ?? null;
       switch (ev.eventType) {
+        // ---- Conversation discovery / membership (Web→Mobile realtime) ----
+        // Historical P0: these cases were MISSING — groups created on Web
+        // only appeared on Mobile after an app reload.
+        case 'conversation.created':
+        case 'conversation.updated':
+        case 'conversation.member-joined':
+        case 'conversation.member-left': {
+          setConversations(prev =>
+            applyConversationEvent(
+              prev,
+              ev.eventType as ConversationEventTypeName,
+              data,
+              selfUserId,
+            ),
+          );
+          break;
+        }
         case 'message.created': {
           // Canonical normalization at the boundary — guarantees the UI
           // message invariants (reactions array, null-safe dates, senderName).
@@ -130,6 +155,20 @@ export function useChatSession(identity: Identity | null) {
               ),
             };
           });
+          // Conversation list reacts to new messages in realtime: summary +
+          // ordering update with NO reload.
+          const preview =
+            m.type === 'TEXT'
+              ? m.content.slice(0, 120)
+              : `[${m.type.toLowerCase()}]`;
+          setConversations(prev =>
+            applyMessageActivity(prev, {
+              conversationId: m.conversationId,
+              sequence: m.sequence,
+              preview: m.content ? preview : null,
+              at: m.createdAt,
+            }),
+          );
           refreshPending();
           break;
         }
@@ -234,7 +273,11 @@ export function useChatSession(identity: Identity | null) {
   );
 
   const sendMessage = useCallback(
-    async (conversationId: string, content: string) => {
+    async (
+      conversationId: string,
+      content: string,
+      replyToId: string | null = null,
+    ) => {
       if (!identity || !lifecycleRef.current) return;
       const clientMessageId =
         globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -242,12 +285,94 @@ export function useChatSession(identity: Identity | null) {
         clientMessageId,
         conversationId,
         content,
-        replyToId: null,
+        replyToId,
       });
       refreshPending();
     },
     [identity, refreshPending],
   );
+
+  /** Media message: upload already produced a durable storageKey — metadata
+   *  only over MQTT (binary NEVER transits the broker). */
+  const sendMediaMessage = useCallback(
+    async (input: {
+      conversationId: string;
+      clientMessageId: string;
+      type: string;
+      content: string;
+      replyToId: string | null;
+      metadata: unknown;
+      pendingContent: string;
+    }) => {
+      if (!identity || !lifecycleRef.current) return;
+      await lifecycleRef.current.send({
+        clientMessageId: input.clientMessageId,
+        conversationId: input.conversationId,
+        content: input.pendingContent,
+        replyToId: input.replyToId,
+        type: input.type,
+        metadata: input.metadata,
+      });
+      refreshPending();
+    },
+    [identity, refreshPending],
+  );
+
+  const editMessage = useCallback(
+    async (conversationId: string, messageId: string, content: string) => {
+      await clientRef.current
+        ?.editMessage({ messageId, conversationId, content })
+        .catch(() => {});
+    },
+    [],
+  );
+
+  const deleteMessage = useCallback(
+    async (conversationId: string, messageId: string) => {
+      await clientRef.current
+        ?.deleteMessage({ messageId, conversationId })
+        .catch(() => {});
+    },
+    [],
+  );
+
+  /** Canonical add/remove reaction — idempotent server-side. */
+  const toggleReaction = useCallback(
+    (
+      conversationId: string,
+      messageId: string,
+      emoji: string,
+      remove: boolean,
+    ) => {
+      const command = remove
+        ? clientRef.current?.removeReaction({
+            messageId,
+            conversationId,
+            emoji,
+          })
+        : clientRef.current?.addReaction({ messageId, conversationId, emoji });
+      command?.catch(() => {});
+    },
+    [],
+  );
+
+  /** Optimistic upsert after REST creation (realtime event dedupes by id). */
+  const upsertLocalConversation = useCallback(
+    (conversation: ApiConversation) => {
+      setConversations(prev =>
+        prev.some(c => c.id === conversation.id)
+          ? prev.map(c => (c.id === conversation.id ? conversation : c))
+          : [conversation, ...prev],
+      );
+    },
+    [],
+  );
+
+  /** Safety-net refetch (mutations also reconcile via canonical events). */
+  const refreshConversations = useCallback(async () => {
+    const convs = await api.listConversations();
+    setConversations(convs);
+  }, []);
 
   const retryMessage = useCallback(
     async (clientMessageId: string) => {
@@ -319,6 +444,12 @@ export function useChatSession(identity: Identity | null) {
       error,
       openConversation,
       sendMessage,
+      sendMediaMessage,
+      editMessage,
+      deleteMessage,
+      toggleReaction,
+      upsertLocalConversation,
+      refreshConversations,
       retryMessage,
       sendTyping,
       pendingListFor,
@@ -334,6 +465,12 @@ export function useChatSession(identity: Identity | null) {
       error,
       openConversation,
       sendMessage,
+      sendMediaMessage,
+      editMessage,
+      deleteMessage,
+      toggleReaction,
+      upsertLocalConversation,
+      refreshConversations,
       retryMessage,
       sendTyping,
       pendingListFor,
