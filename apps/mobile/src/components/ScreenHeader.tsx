@@ -1,18 +1,19 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, typography } from '../theme/tokens';
+import { colors, radius, TOUCH_TARGET, typography } from '../theme/tokens';
 
 /**
- * ONE reusable native header primitive (#10): back + centered title/subtitle
- * + optional right action. Every screen renders this instead of hand-rolled
- * header rows — kills the wrapped "‹ Bac k" label class (#9) by giving the
- * back button a fixed minimum width with single-line text and letting the
- * title block flex between two fixed-width side slots.
+ * ONE reusable native header primitive (§10): back + avatar + centered
+ * title/subtitle + optional right action. Every screen renders this instead
+ * of hand-rolled header rows. Fixed-width side slots keep the title truly
+ * centered and single-line at every width; controls are 44pt targets.
  */
 export function ScreenHeader({
   title,
   subtitle,
+  avatar,
+  avatarColor,
   onBack,
   backLabel = 'Back',
   right,
@@ -20,6 +21,9 @@ export function ScreenHeader({
 }: {
   title: string;
   subtitle?: string | null;
+  /** Initials for the conversation avatar (omitted → no avatar). */
+  avatar?: string;
+  avatarColor?: string;
   /** Omit → no back control (root screens). */
   onBack?: () => void;
   backLabel?: string;
@@ -33,7 +37,6 @@ export function ScreenHeader({
       {onBack ? (
         <Pressable
           onPress={onBack}
-          hitSlop={8}
           style={styles.backSlot}
           accessibilityRole="button"
           accessibilityLabel={`Go back from ${title}`}
@@ -49,15 +52,33 @@ export function ScreenHeader({
         style={styles.center}
         disabled={!onPressTitle}
         onPress={onPressTitle}
+        accessibilityRole={onPressTitle ? 'button' : undefined}
+        accessibilityLabel={
+          onPressTitle ? `Open details for ${title}` : undefined
+        }
       >
-        <Text style={styles.title} numberOfLines={1}>
-          {title}
-        </Text>
-        {!!subtitle && (
-          <Text style={styles.subtitle} numberOfLines={1}>
-            {subtitle}
-          </Text>
+        {!!avatar && (
+          <View
+            style={[
+              styles.avatar,
+              { backgroundColor: avatarColor ?? colors.surfaceHigh },
+            ]}
+          >
+            <Text style={styles.avatarText}>
+              {avatar.slice(0, 2).toUpperCase()}
+            </Text>
+          </View>
         )}
+        <View style={styles.titleBlock}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          {!!subtitle && (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          )}
+        </View>
       </Pressable>
       {right ? (
         <View style={styles.rightSlot}>{right}</View>
@@ -68,31 +89,54 @@ export function ScreenHeader({
   );
 }
 
-const HEADER_SIDE = 72; // fits "‹ Back" and "＋ New" on one line at every width
+const HEADER_SIDE = 76; // fits "‹ Back" and "＋ New" on one line at every width
 
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingBottom: 10,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
   },
-  backSlot: { minWidth: HEADER_SIDE, flexShrink: 0 },
+  backSlot: {
+    minWidth: HEADER_SIDE,
+    flexShrink: 0,
+    height: TOUCH_TARGET,
+    justifyContent: 'center',
+  },
   rightSlot: {
     minWidth: HEADER_SIDE,
     flexShrink: 0,
     alignItems: 'flex-end',
   },
-  sideSpacer: { width: 44, flexShrink: 0 },
-  center: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
-  back: { color: colors.primary, fontSize: 16 },
+  sideSpacer: { width: HEADER_SIDE, flexShrink: 0 },
+  center: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 4,
+    minHeight: TOUCH_TARGET,
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  titleBlock: { flexShrink: 1, alignItems: 'center' },
+  back: { color: colors.primaryStrong, fontSize: 16, fontWeight: '500' },
   title: { color: colors.textPrimary, ...typography.title },
   subtitle: {
     color: colors.textSecondary,
-    ...typography.subtitle,
+    fontSize: 12,
+    fontWeight: '400',
     marginTop: 1,
   },
 });

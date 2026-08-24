@@ -12,14 +12,21 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../components/ScreenHeader';
+import {
+  avatarColorFor,
+  colors,
+  radius,
+  spacing,
+  typography,
+  TOUCH_TARGET,
+} from '../theme/tokens';
 import { api, type ApiConversation, type ApiUser } from '../lib/api';
 
 /**
- * Group details (mobile): member list with presence, add-member (searchable
- * non-members), remove-member, and the group lifecycle ender — Delete Group
- * behind a destructive confirmation sheet (#12/#14). All mutations go through
- * the API — canonical member-joined/left/deleted events reconcile every
- * client with no reload. Identity is always the runtime userId.
+ * Group details v2 (§22): a real product screen — group identity block,
+ * Members section (avatar · name · role · consistent per-row action), add
+ * member, and a quiet destructive area. No loose floating labels; every
+ * mutation goes through the API — canonical events reconcile all clients.
  */
 export function GroupDetailsScreen({
   conversation,
@@ -59,8 +66,7 @@ export function GroupDetailsScreen({
         u =>
           !memberIds.has(u.id) &&
           (filter.trim() === '' ||
-            u.displayName.toLowerCase().includes(filter.trim().toLowerCase()) ||
-            u.id.toLowerCase().includes(filter.trim().toLowerCase())),
+            u.displayName.toLowerCase().includes(filter.trim().toLowerCase())),
       ),
     [users, memberIds, filter],
   );
@@ -87,7 +93,7 @@ export function GroupDetailsScreen({
     const user = users.find(u => u.id === userId);
     Alert.alert(
       'Remove member',
-      `Remove ${user?.displayName ?? userId} from this group?`,
+      `Remove ${user?.displayName ?? 'this member'} from the group?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -118,7 +124,7 @@ export function GroupDetailsScreen({
     );
   };
 
-  /** Lifecycle ender (#12): tombstone the group; canonical event reconciles. */
+  /** Lifecycle ender: tombstone the group; canonical event reconciles. */
   const deleteGroup = async (): Promise<void> => {
     if (busy || identityUserId === null) return;
     setBusy(true);
@@ -140,7 +146,6 @@ export function GroupDetailsScreen({
     <View style={styles.container}>
       <ScreenHeader
         title={conversation.title ?? 'Group'}
-        subtitle={`${members.length} members`}
         onBack={onBack}
         right={
           // Permission model (#38): only an ADMIN may add members — the
@@ -149,14 +154,35 @@ export function GroupDetailsScreen({
           isAdmin ? (
             <Pressable
               onPress={() => setAdding(v => !v)}
-              hitSlop={8}
+              style={styles.headerAction}
+              accessibilityRole="button"
               accessibilityLabel="Add member"
             >
-              <Text style={styles.add}>+ Add</Text>
+              <Text style={styles.headerActionText}>＋ Add</Text>
             </Pressable>
           ) : undefined
         }
       />
+
+      {/* Group identity block (§22) */}
+      <View style={styles.identityBlock}>
+        <View
+          style={[
+            styles.groupAvatar,
+            { backgroundColor: avatarColorFor(conversation.id).bg },
+          ]}
+        >
+          <Text style={styles.groupAvatarText}>
+            {(conversation.title ?? 'G').slice(0, 2).toUpperCase()}
+          </Text>
+        </View>
+        <Text style={styles.groupName} numberOfLines={1}>
+          {conversation.title ?? 'Group'}
+        </Text>
+        <Text style={styles.groupMeta}>
+          {members.length} {members.length === 1 ? 'member' : 'members'}
+        </Text>
+      </View>
 
       {adding && isAdmin && (
         <View style={styles.addPanel}>
@@ -164,25 +190,42 @@ export function GroupDetailsScreen({
             style={styles.search}
             value={filter}
             onChangeText={setFilter}
-            placeholder="Search users not in group…"
-            placeholderTextColor="#64748b"
+            placeholder="Search people to add…"
+            placeholderTextColor={colors.textMuted}
+            accessibilityLabel="Search people to add"
           />
           <FlatList
             data={nonMembers}
             keyExtractor={u => u.id}
-            style={{ maxHeight: 180 }}
+            style={{ maxHeight: 190 }}
+            keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <Pressable
-                style={styles.row}
+                style={({ pressed }) => [
+                  styles.addRow,
+                  pressed && styles.rowPressed,
+                ]}
                 disabled={busy}
                 onPress={() => {
                   void addMember(item.id);
                 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${item.displayName}`}
               >
+                <View
+                  style={[
+                    styles.avatar,
+                    { backgroundColor: avatarColorFor(item.id).bg },
+                  ]}
+                >
+                  <Text style={styles.avatarText}>
+                    {item.displayName.slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
                 <Text style={styles.name} numberOfLines={1}>
                   {item.displayName}
                 </Text>
-                <Text style={styles.addSmall}>Add</Text>
+                <Text style={styles.addLabel}>Add</Text>
               </Pressable>
             )}
             ListEmptyComponent={
@@ -195,50 +238,42 @@ export function GroupDetailsScreen({
       <FlatList
         data={members}
         keyExtractor={m => m.userId}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
-        ListFooterComponent={
-          isAdmin ? (
-            <View style={styles.dangerZone}>
-              <Text style={styles.dangerTitle}>DANGER ZONE</Text>
-              <Pressable
-                style={styles.deleteButton}
-                disabled={busy}
-                onPress={() => setConfirmDelete(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Delete group"
-              >
-                <Text style={styles.deleteButtonText}>Delete Group</Text>
-              </Pressable>
-            </View>
-          ) : undefined
+        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}
+        ListHeaderComponent={
+          <Text style={styles.sectionLabel}>Members · {members.length}</Text>
         }
         renderItem={({ item }) => {
           const user = users.find(u => u.id === item.userId);
           const isSelf = item.userId === identityUserId;
+          const display = isSelf ? 'You' : (user?.displayName ?? 'Member');
           // Permission model (#38), mirroring web: an ADMIN may remove
           // OTHERS; any member may remove THEMSELVES (leave). Everyone else
           // sees no action — the server would reject it with 403 anyway.
           const canRemove = isAdmin ? !isSelf : isSelf;
           return (
             <View style={styles.row}>
-              <View style={styles.avatar}>
+              <View
+                style={[
+                  styles.avatar,
+                  { backgroundColor: avatarColorFor(item.userId).bg },
+                ]}
+              >
                 <Text style={styles.avatarText}>
-                  {(user?.displayName ?? item.userId).slice(0, 1).toUpperCase()}
+                  {display.slice(0, 1).toUpperCase()}
                 </Text>
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={styles.memberMeta}>
                 <Text style={styles.name} numberOfLines={1}>
-                  {isSelf ? 'You' : (user?.displayName ?? item.userId)}
+                  {display}
                 </Text>
               </View>
               {item.role === 'ADMIN' && (
                 <View style={styles.roleBadge}>
-                  <Text style={styles.roleText}>ADMIN</Text>
+                  <Text style={styles.roleText}>Admin</Text>
                 </View>
               )}
               {canRemove && (
                 <Pressable
-                  hitSlop={8}
                   disabled={busy}
                   onPress={() => {
                     if (isSelf) {
@@ -258,8 +293,13 @@ export function GroupDetailsScreen({
                       removeMember(item.userId);
                     }
                   }}
+                  style={styles.memberAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isSelf ? 'Leave group' : `Remove ${display}`
+                  }
                 >
-                  <Text style={isSelf ? styles.leave : styles.remove}>
+                  <Text style={isSelf ? styles.leaveText : styles.removeText}>
                     {isSelf ? 'Leave' : 'Remove'}
                   </Text>
                 </Pressable>
@@ -268,14 +308,33 @@ export function GroupDetailsScreen({
           );
         }}
         ListEmptyComponent={<Text style={styles.empty}>No members</Text>}
+        ListFooterComponent={
+          isAdmin ? (
+            <View style={styles.dangerZone}>
+              <Text style={styles.dangerTitle}>Danger zone</Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.deleteButton,
+                  pressed && styles.rowPressed,
+                ]}
+                disabled={busy}
+                onPress={() => setConfirmDelete(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Delete group"
+              >
+                <Text style={styles.deleteButtonText}>Delete Group</Text>
+              </Pressable>
+            </View>
+          ) : undefined
+        }
       />
       {busy && (
         <View style={styles.busyOverlay}>
-          <ActivityIndicator color="#818cf8" />
+          <ActivityIndicator color={colors.primaryStrong} />
         </View>
       )}
 
-      {/* Destructive confirmation (#14) — never a single-tap delete. */}
+      {/* Destructive confirmation — never a single-tap delete. */}
       <Modal
         visible={confirmDelete}
         transparent
@@ -288,14 +347,18 @@ export function GroupDetailsScreen({
         >
           <Pressable style={styles.sheet} onPress={() => undefined}>
             <Text style={styles.sheetTitle}>
-              Delete "{conversation.title ?? 'Group'}"?
+              Delete “{conversation.title ?? 'Group'}”?
             </Text>
             <Text style={styles.sheetBody}>
-              This group will be removed for all members.
+              The group is removed for all {members.length} members. Message
+              history is kept by the server.
             </Text>
             <View style={styles.sheetActions}>
               <Pressable
-                style={styles.sheetCancel}
+                style={({ pressed }) => [
+                  styles.sheetCancel,
+                  pressed && styles.rowPressed,
+                ]}
                 onPress={() => setConfirmDelete(false)}
                 accessibilityRole="button"
                 accessibilityLabel="Cancel delete"
@@ -303,7 +366,10 @@ export function GroupDetailsScreen({
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </Pressable>
               <Pressable
-                style={styles.sheetDelete}
+                style={({ pressed }) => [
+                  styles.sheetDelete,
+                  pressed && styles.rowPressed,
+                ]}
                 onPress={() => {
                   void deleteGroup();
                 }}
@@ -321,129 +387,201 @@ export function GroupDetailsScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  header: {
-    flexDirection: 'row',
+  container: { flex: 1, backgroundColor: colors.background },
+  headerAction: {
+    minWidth: TOUCH_TARGET,
+    height: TOUCH_TARGET,
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
+    justifyContent: 'center',
   },
-  back: { color: '#818cf8', fontSize: 16, width: 44 },
-  add: {
-    color: '#818cf8',
+  headerActionText: {
+    color: colors.primaryStrong,
     fontSize: 15,
     fontWeight: '600',
-    width: 48,
-    textAlign: 'right',
   },
-  headerText: { flex: 1 },
-  title: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  subtitle: { color: '#94a3b8', fontSize: 12 },
-  addPanel: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  identityBlock: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl,
+    gap: 6,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    gap: 8,
+    borderBottomColor: colors.border,
+  },
+  groupAvatar: {
+    width: 76,
+    height: 76,
+    borderRadius: radius.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  groupAvatarText: {
+    color: colors.textPrimary,
+    fontSize: 26,
+    fontWeight: '700',
+  },
+  groupName: { ...typography.screenTitle, color: colors.textPrimary },
+  groupMeta: { ...typography.caption, color: colors.textSecondary },
+  sectionLabel: {
+    ...typography.meta,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: 6,
+  },
+  addPanel: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.sm,
   },
   search: {
-    backgroundColor: '#1e293b',
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    minHeight: 42,
+    paddingVertical: 9,
+    color: colors.textPrimary,
+    fontSize: 15,
+  },
+  addRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: 6,
     paddingVertical: 8,
-    color: '#fff',
+    borderRadius: radius.md,
+    minHeight: 52,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 9,
+    minHeight: 56,
   },
+  rowPressed: { opacity: 0.75 },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#334155',
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: '#fff', fontWeight: '700' },
-  name: { color: '#fff', fontSize: 15, flex: 1 },
+  avatarText: { color: colors.textPrimary, fontWeight: '700' },
+  memberMeta: { flex: 1 },
+  name: { ...typography.body, color: colors.textPrimary },
   roleBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.sm + 2,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
-  roleText: { color: '#fbbf24', fontSize: 10, fontWeight: '700' },
-  remove: { color: '#f87171', fontSize: 13 },
+  roleText: { color: colors.primaryStrong, fontSize: 11, fontWeight: '700' },
+  memberAction: {
+    minWidth: TOUCH_TARGET - 6,
+    minHeight: TOUCH_TARGET - 6,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  removeText: { color: colors.danger, fontSize: 13, fontWeight: '600' },
   // Self-leave is a neutral action (web parity) — not destructive red.
-  leave: { color: '#818cf8', fontSize: 13 },
-  addSmall: { color: '#818cf8', fontSize: 14, fontWeight: '600' },
-  empty: { color: '#64748b', textAlign: 'center', marginTop: 16 },
-  busyOverlay: { position: 'absolute', top: 60, right: 20 },
-  // ---- Danger zone (#14) -------------------------------------------------
-  dangerZone: {
-    marginTop: 16,
-    marginHorizontal: 16,
+  leaveText: { color: colors.primaryStrong, fontSize: 13, fontWeight: '600' },
+  addLabel: { color: colors.primaryStrong, fontSize: 14, fontWeight: '600' },
+  empty: { color: colors.textMuted, textAlign: 'center', marginTop: 16 },
+  busyOverlay: {
+    position: 'absolute',
+    bottom: 28,
+    right: spacing.lg,
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.35)',
-    borderRadius: 12,
-    padding: 12,
-    gap: 10,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Danger zone — quiet, not GitHub-red (§6).
+  dangerZone: {
+    marginTop: spacing.xl,
+    marginHorizontal: spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.25)',
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    gap: spacing.sm,
   },
   dangerTitle: {
-    color: '#f87171',
+    color: colors.danger,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   deleteButton: {
     borderWidth: 1,
-    borderColor: '#ef4444',
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  deleteButtonText: { color: '#ef4444', fontSize: 14, fontWeight: '600' },
-  sheetBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.6)',
+    borderColor: colors.danger,
+    borderRadius: radius.md,
+    minHeight: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+  },
+  deleteButtonText: { color: colors.danger, fontSize: 14, fontWeight: '600' },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: colors.backdrop,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxl,
   },
   sheet: {
-    backgroundColor: '#1e293b',
-    borderRadius: 14,
-    padding: 18,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
     width: '100%',
     maxWidth: 340,
-    gap: 10,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  sheetTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  sheetBody: { color: '#94a3b8', fontSize: 13 },
+  sheetTitle: { ...typography.title, color: colors.textPrimary },
+  sheetBody: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
   sheetActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 10,
-    marginTop: 4,
+    gap: spacing.sm,
+    marginTop: spacing.xs,
   },
   sheetCancel: {
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    backgroundColor: '#334155',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    backgroundColor: colors.surfaceRaised,
+    minHeight: TOUCH_TARGET - 4,
+    justifyContent: 'center',
   },
-  sheetCancelText: { color: '#e2e8f0', fontSize: 14, fontWeight: '600' },
+  sheetCancelText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   sheetDelete: {
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    backgroundColor: '#ef4444',
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    backgroundColor: colors.dangerStrong,
+    minHeight: TOUCH_TARGET - 4,
+    justifyContent: 'center',
   },
-  sheetDeleteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  sheetDeleteText: { color: colors.onDanger, fontSize: 14, fontWeight: '700' },
 });

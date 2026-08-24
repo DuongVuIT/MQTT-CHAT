@@ -77,11 +77,12 @@ export const api = {
     ).then(r => r.conversations),
   getMessages: (
     conversationId: string,
-    opts?: { limit?: number; before?: number },
+    opts?: { limit?: number; before?: number; after?: number },
   ) => {
     const params = new URLSearchParams();
     if (opts?.limit) params.set('limit', String(opts.limit));
     if (opts?.before) params.set('before', String(opts.before));
+    if (opts?.after) params.set('after', String(opts.after));
     const qs = params.toString();
     return request<{ messages: ApiMessage[]; hasMore: boolean }>(
       `/conversations/${encodeURIComponent(conversationId)}/messages${qs ? `?${qs}` : ''}`,

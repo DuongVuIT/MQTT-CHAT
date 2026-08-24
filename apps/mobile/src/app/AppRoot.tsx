@@ -1,7 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { pick, types as docTypes } from '@react-native-documents/picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   normalizeMediaType,
   resolveMediaType,
@@ -13,6 +21,14 @@ import { ConversationListScreen } from '../screens/ConversationListScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { NewConversationScreen } from '../screens/NewConversationScreen';
 import { GroupDetailsScreen } from '../screens/GroupDetailsScreen';
+import { ProfileSheet } from '../components/ProfileSheet';
+import {
+  colors,
+  elevation,
+  radius,
+  spacing,
+  typography,
+} from '../theme/tokens';
 
 type Route =
   | { screen: 'picker' }
@@ -47,6 +63,11 @@ function conversationTitle(
   );
 }
 
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map(p => p.slice(0, 1).toUpperCase()).join('');
+}
+
 /**
  * Canonical media policy — ONE source of truth in @mqtt-chat/mqtt-contracts
  * (repair-log #26). Never raw-compares picker MIME: iOS reports JPEG as
@@ -63,7 +84,9 @@ export function AppRoot() {
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [route, setRoute] = useState<Route>({ screen: 'picker' });
   const [uploading, setUploading] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const session = useChatSession(identity);
+  const insets = useSafeAreaInsets();
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -87,17 +110,50 @@ export function AppRoot() {
 
   const identityUser = users.find(u => u.id === identity?.userId) ?? null;
 
+  // Deleted-conversation guards must not setRoute during render (a blank
+  // frame used to flash) — defer to an effect. Only trust the check once the
+  // roster has actually loaded, or the first paint would bounce home.
+  const ghostRoute =
+    session.conversations.length > 0 &&
+    (route.screen === 'details' || route.screen === 'chat') &&
+    !session.conversations.some(c => c.id === route.conversationId);
+
+  useEffect(() => {
+    if (ghostRoute && identity) setRoute({ screen: 'list' });
+  }, [ghostRoute, identity]);
+
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#818cf8" />
+        <ActivityIndicator color={colors.primaryStrong} />
       </View>
     );
   }
   if (loadError) {
     return (
-      <View style={styles.center}>
-        <Text style={{ color: '#f87171' }}>{loadError}</Text>
+      <View style={[styles.center, styles.pad]}>
+        <Text style={styles.errorTitle}>Couldn’t reach the server</Text>
+        <Text style={styles.errorBody}>{loadError}</Text>
+        <Pressable
+          style={styles.retryBtn}
+          onPress={() => {
+            setLoadError(null);
+            setLoading(true);
+            api
+              .listUsers()
+              .then(us => setUsers(us))
+              .catch(e =>
+                setLoadError(
+                  e instanceof Error ? e.message : 'failed to load users',
+                ),
+              )
+              .finally(() => setLoading(false));
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Retry"
+        >
+          <Text style={styles.retryText}>Try again</Text>
+        </Pressable>
       </View>
     );
   }
@@ -130,7 +186,7 @@ export function AppRoot() {
     const conversationId = activeConversationId;
     if (!conversationId || !identity) return;
     if (file.size > MAX_UPLOAD_BYTES) {
-      Alert.alert('File too large', 'Maximum upload size is 50 MB.');
+      AlertTooLarge();
       return;
     }
     setUploading(true);
@@ -156,11 +212,7 @@ export function AppRoot() {
         pendingContent: `📎 ${uploaded.filename}`,
       });
     } catch (e) {
-      Alert.alert(
-        'Upload failed',
-        e instanceof Error ? e.message : 'Unknown error',
-        [{ text: 'OK' }],
-      );
+      AlertUploadFailed(e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setUploading(false);
     }
@@ -183,8 +235,7 @@ export function AppRoot() {
             normalized === 'image/heif' ||
             asset.fileName?.toLowerCase().endsWith('.heic') ||
             asset.fileName?.toLowerCase().endsWith('.heif');
-          Alert.alert(
-            'Unsupported image',
+          AlertUnsupported(
             isHeic
               ? 'HEIC/HEIF photos are not supported yet. Share the photo as JPEG instead.'
               : `Type ${normalized ?? 'unknown'} is not supported.`,
@@ -192,7 +243,7 @@ export function AppRoot() {
           return;
         }
         if (!resolved.startsWith('image/')) {
-          Alert.alert('Unsupported image', `${resolved} is not an image type.`);
+          AlertUnsupported(`${resolved} is not an image type.`);
           return;
         }
         void handlePickedFile(
@@ -263,11 +314,7 @@ export function AppRoot() {
     const conversation = session.conversations.find(
       c => c.id === route.conversationId,
     );
-    if (!conversation) {
-      // Deleted under us (conversation.deleted) → leave the screen safely.
-      setRoute({ screen: 'list' });
-      return null;
-    }
+    if (!conversation) return null; // effect navigates home
     return (
       <GroupDetailsScreen
         conversation={conversation}
@@ -284,77 +331,106 @@ export function AppRoot() {
 
   if (route.screen === 'list') {
     return (
-      <ConversationListScreen
-        conversations={session.conversations}
-        presence={session.presence}
-        status={session.status}
-        users={users}
-        identityUserId={identity.userId}
-        identityDisplayName={identityUser?.displayName ?? identity.userId}
-        onOpen={conversationId => {
-          const conv = session.conversations.find(c => c.id === conversationId);
-          void session.openConversation(conversationId);
-          setRoute({
-            screen: 'chat',
-            conversationId,
-            title: conversationTitle(conv, users, identity.userId),
-            subtitle:
-              conv && conv.type === 'GROUP'
-                ? `${conv.members?.length ?? 0} members`
-                : null,
-            isGroup: conv?.type === 'GROUP',
-          });
-        }}
-        onNew={() => setRoute({ screen: 'new' })}
-        // Profile switch: identity state change tears the whole session down
-        // (useChatSession cleanup) and starts a fresh one on pick — §42.
-        onProfile={() => {
-          Alert.alert(
-            identityUser?.displayName ?? identity.userId,
-            identity.userId,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Switch profile',
-                style: 'default',
-                onPress: () => {
-                  setIdentity(null);
-                  setRoute({ screen: 'picker' });
-                },
-              },
-            ],
-          );
-        }}
-      />
+      <View style={styles.root}>
+        <ConversationListScreen
+          conversations={session.conversations}
+          presence={session.presence}
+          status={session.status}
+          users={users}
+          identityUserId={identity.userId}
+          identityDisplayName={identityUser?.displayName ?? identity.userId}
+          loading={!session.conversationsLoaded}
+          onOpen={conversationId => {
+            const conv = session.conversations.find(
+              c => c.id === conversationId,
+            );
+            void session.openConversation(conversationId);
+            setRoute({
+              screen: 'chat',
+              conversationId,
+              title: conversationTitle(conv, users, identity.userId),
+              subtitle:
+                conv && conv.type === 'GROUP'
+                  ? `${conv.members?.length ?? 0} members`
+                  : null,
+              isGroup: conv?.type === 'GROUP',
+            });
+          }}
+          onNew={() => setRoute({ screen: 'new' })}
+          onProfile={() => setProfileOpen(true)}
+        />
+        <ProfileSheet
+          visible={profileOpen}
+          displayName={identityUser?.displayName ?? identity.userId}
+          userId={identity.userId}
+          deviceId={identity.deviceId}
+          status={session.status}
+          onClose={() => setProfileOpen(false)}
+          onSwitch={() => {
+            setProfileOpen(false);
+            // Identity state change tears the whole session down
+            // (useChatSession cleanup) and starts a fresh one on pick.
+            setIdentity(null);
+            setRoute({ screen: 'picker' });
+          }}
+        />
+      </View>
     );
   }
 
   const activeConv = session.conversations.find(
     c => c.id === route.conversationId,
   );
-  if (!activeConv) {
-    // The open conversation was deleted in realtime (#28) — exit the chat
-    // safely instead of rendering a ghost conversation.
-    setRoute({ screen: 'list' });
-    return null;
+  if (!activeConv) return null; // effect navigates home
+
+  // Read receipts (§14): max lastReadSequence among OTHER members — my
+  // message is "read" once any peer's watermark passes its sequence. (Plain
+  // computation — hooks must not sit behind the early returns above.)
+  let readWatermark = 0;
+  for (const m of activeConv.members ?? []) {
+    if (m.userId !== identity.userId && m.lastReadSequence > readWatermark) {
+      readWatermark = m.lastReadSequence;
+    }
   }
 
+  const peerId =
+    activeConv.members?.find(m => m.userId !== identity.userId)?.userId ?? '';
+  const peerName =
+    users.find(u => u.id === peerId)?.displayName ??
+    activeConv.title ??
+    route.title;
+
   return (
-    <View style={{ flex: 1 }}>
+    <View style={styles.root}>
       <ChatScreen
         title={route.title}
         subtitle={route.subtitle ?? undefined}
+        peerInitials={initialsOf(peerName)}
         messages={session.messagesByConv[route.conversationId] ?? []}
         pending={session.pendingListFor(route.conversationId)}
         typingUsers={session.typingByConv[route.conversationId] ?? []}
         identityUserId={identity.userId}
         isGroup={route.isGroup}
+        readWatermark={readWatermark}
         hasMoreHistory={session.hasMoreByConv[route.conversationId] ?? false}
         loadingEarlier={
           session.loadingEarlierByConv[route.conversationId] ?? false
         }
+        loadingHistory={
+          (session.loadingHistoryByConv[route.conversationId] ?? false) &&
+          (session.messagesByConv[route.conversationId]?.length ?? 0) === 0
+        }
+        historyError={
+          session.messagesByConv[route.conversationId]?.length === 0
+            ? session.error
+            : null
+        }
         onLoadEarlier={() => {
           void session.loadOlderMessages(route.conversationId);
+        }}
+        onRetryHistory={() => {
+          session.clearError();
+          void session.openConversation(route.conversationId);
         }}
         actions={{
           send: (content, replyToId) => {
@@ -392,8 +468,14 @@ export function AppRoot() {
         }
       />
       {uploading && (
-        <View style={styles.uploadOverlay}>
-          <ActivityIndicator color="#818cf8" />
+        <View
+          style={[
+            styles.uploadOverlay,
+            elevation.floating,
+            { bottom: 96 + insets.bottom },
+          ]}
+        >
+          <ActivityIndicator color={colors.primaryStrong} size="small" />
           <Text style={styles.uploadText}>Uploading…</Text>
         </View>
       )}
@@ -401,24 +483,50 @@ export function AppRoot() {
   );
 }
 
+// Small alert helpers keep the flows readable (product copy, never raw errors).
+const AlertTooLarge = (): void =>
+  Alert.alert('File too large', 'Maximum upload size is 50 MB.');
+const AlertUploadFailed = (message: string): void =>
+  Alert.alert('Upload failed', message, [{ text: 'OK' }]);
+const AlertUnsupported = (message: string): void =>
+  Alert.alert('Unsupported image', message);
+
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.background },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.background,
+    gap: spacing.sm,
   },
+  pad: { paddingHorizontal: spacing.xxl },
+  errorTitle: { color: colors.textPrimary, ...typography.title },
+  errorBody: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  retryText: { color: colors.onPrimary, fontWeight: '700' },
   uploadOverlay: {
     position: 'absolute',
-    bottom: 90,
     alignSelf: 'center',
     flexDirection: 'row',
-    gap: 8,
+    gap: spacing.sm,
     alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm + 2,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
   },
-  uploadText: { color: '#cbd5e1', fontSize: 13 },
+  uploadText: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
 });

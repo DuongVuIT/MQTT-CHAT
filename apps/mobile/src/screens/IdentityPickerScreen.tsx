@@ -2,12 +2,19 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ApiUser } from '../lib/api';
+import {
+  avatarColorFor,
+  colors,
+  radius,
+  spacing,
+  typography,
+} from '../theme/tokens';
 
 /**
  * Identity picker — safe-area correct (nothing under the notch/Dynamic
- * Island), runtime data only, long names truncated. Test-fixture ids
- * (fx…/e2e-…) are a display-level filter so automated users never show up
- * as pickable demo identities.
+ * Island), product-styled. This demo has no auth: picking an identity IS the
+ * sign-in. Test-fixture ids (fx…/e2e-…) are filtered so automated users
+ * never show up as pickable demo identities.
  */
 export function IdentityPickerScreen({
   users,
@@ -25,33 +32,45 @@ export function IdentityPickerScreen({
     <View
       style={[
         styles.container,
-        { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 },
+        { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 },
       ]}
     >
+      <View style={styles.brandRow}>
+        <View style={styles.brandMark}>
+          <Text style={styles.brandMarkText}>💬</Text>
+        </View>
+      </View>
       <Text style={styles.title}>MQTT Chat</Text>
-      <Text style={styles.subtitle}>Pick a demo identity</Text>
-      <ScrollView contentContainerStyle={styles.list}>
-        {visible.map(u => (
-          <Pressable
-            key={u.id}
-            style={styles.item}
-            onPress={() => onPick(u.id)}
-          >
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {u.displayName.slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
-            <View style={styles.itemText}>
+      <Text style={styles.subtitle}>Choose who you are to start chatting</Text>
+      <ScrollView
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+      >
+        {visible.map(u => {
+          const c = avatarColorFor(u.id);
+          return (
+            <Pressable
+              key={u.id}
+              style={({ pressed }) => [
+                styles.item,
+                pressed && styles.itemPressed,
+              ]}
+              onPress={() => onPick(u.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`Continue as ${u.displayName}`}
+            >
+              <View style={[styles.avatar, { backgroundColor: c.bg }]}>
+                <Text style={styles.avatarText}>
+                  {u.displayName.slice(0, 1).toUpperCase()}
+                </Text>
+              </View>
               <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
                 {u.displayName}
               </Text>
-              <Text style={styles.id} numberOfLines={1} ellipsizeMode="middle">
-                {u.id}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
+              <Text style={styles.chevron}>›</Text>
+            </Pressable>
+          );
+        })}
         {visible.length === 0 && (
           <Text style={styles.empty}>No users available</Text>
         )}
@@ -64,33 +83,49 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: '#0f172a',
-    gap: 12,
+    backgroundColor: colors.background,
+    gap: spacing.sm + 2,
   },
-  title: { color: '#fff', fontSize: 28, fontWeight: '700' },
-  subtitle: { color: '#94a3b8', marginBottom: 8 },
-  list: { alignItems: 'center', gap: 12 },
-  item: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 12,
-    width: 280,
-  },
-  itemText: { flex: 1 },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#4f46e5',
+  brandRow: { marginBottom: spacing.xs },
+  brandMark: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.xl,
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: '#fff', fontWeight: '700' },
-  name: { color: '#fff', fontSize: 16 },
-  id: { color: '#64748b', fontSize: 11, marginTop: 2 },
-  empty: { color: '#64748b', marginTop: 24 },
+  brandMarkText: { fontSize: 30 },
+  title: { ...typography.display, color: colors.textPrimary },
+  subtitle: {
+    ...typography.subtitle,
+    color: colors.textSecondary,
+    marginBottom: spacing.lg,
+  },
+  list: { alignItems: 'center', gap: spacing.md },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 12,
+    borderRadius: radius.lg,
+    width: 300,
+    minHeight: 64,
+  },
+  itemPressed: { backgroundColor: colors.surfaceHigh },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: colors.textPrimary, fontWeight: '700', fontSize: 16 },
+  name: { ...typography.title, color: colors.textPrimary, flex: 1 },
+  chevron: { color: colors.textMuted, fontSize: 18, fontWeight: '600' },
+  empty: { color: colors.textMuted, marginTop: 24 },
 });

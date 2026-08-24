@@ -25,6 +25,17 @@ import { MessageLifecycleStore } from '../features/messaging/message-lifecycle';
 // publishes per conversation; silence ⇒ deterministic auto-stop after 2s.
 const TYPING_THROTTLE_MS = 1000;
 const TYPING_AUTOSTOP_MS = 2000;
+// Incoming typing TTL (§49): `typing.stopped` rides QoS0 and the server's
+// Redis expiry is never re-broadcast — a lost frame would leave "X is
+// typing…" stuck forever. Each `typing.started` stamps a receipt; a 2s sweep
+// drops entries older than the TTL.
+const TYPING_TTL_MS = 8000;
+const TYPING_SWEEP_MS = 2000;
+// Presence grace (§50): LWT publishes offline instantly on any drop and the
+// client reconnects ~2s later — without grace every network blip flickers
+// peers offline→online. Offline flips are held for this window; an online
+// event inside it cancels the flip silently.
+const PRESENCE_GRACE_MS = 10_000;
 
 export interface Identity {
   userId: string;
@@ -40,12 +51,18 @@ export function useChatSession(identity: Identity | null) {
   const [status, setStatus] = useState<ConnectionStatus>('offline');
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
+  // Bootstrap completion — the list screen distinguishes "still loading"
+  // from a genuinely empty account (skeleton vs empty state, §66).
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [messagesByConv, setMessagesByConv] = useState<
     Record<string, ApiMessage[]>
   >({});
-  const [pendingByConv, setPendingByConv] = useState<Record<string, number>>(
-    {},
-  );
+  // Pending sends live in the lifecycle store; components read them via
+  // pendingListFor(). This counter just signals "pending changed" so the
+  // (single) consumer re-renders — the old per-conversation recount map
+  // recomputed EVERY conversation's pending list on every event for a
+  // consumer that never read it.
+  const [pendingVersion, setPendingVersion] = useState(0);
   const [typingByConv, setTypingByConv] = useState<Record<string, string[]>>(
     {},
   );
@@ -56,6 +73,11 @@ export function useChatSession(identity: Identity | null) {
   const [loadingEarlierByConv, setLoadingEarlierByConv] = useState<
     Record<string, boolean>
   >({});
+  // Initial history fetch in flight per conversation — the chat screen shows
+  // a skeleton instead of a false "No messages yet" (§66).
+  const [loadingHistoryByConv, setLoadingHistoryByConv] = useState<
+    Record<string, boolean>
+  >({});
   const [error, setError] = useState<string | null>(null);
 
   const clientRef = useRef<ChatRealtimeClient | null>(null);
@@ -63,6 +85,12 @@ export function useChatSession(identity: Identity | null) {
   // the pending auto-stop timer.
   const typingLastSentRef = useRef(new Map<string, number>());
   const typingStopTimersRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
+  // Incoming typing receipts: conversationId → (userId → last `started` ms).
+  const typingSeenRef = useRef(new Map<string, Map<string, number>>());
+  // Presence grace: userId → timer that will apply the offline flip.
+  const presenceGraceTimersRef = useRef(
     new Map<string, ReturnType<typeof setTimeout>>(),
   );
   const lifecycleRef = useRef<MessageLifecycleStore | null>(null);
@@ -78,16 +106,76 @@ export function useChatSession(identity: Identity | null) {
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
+  // Same idea for opened-conversation keys: the reconnect-heal effect must
+  // not re-arm on every message array change.
+  const openedConvsRef = useRef<Set<string>>(new Set());
+  const messagesByConvRef = useRef(messagesByConv);
+  useEffect(() => {
+    openedConvsRef.current = new Set(Object.keys(messagesByConv));
+    messagesByConvRef.current = messagesByConv;
+  }, [messagesByConv]);
 
-  // Stable across renders by construction (reads state through refs).
-  const refreshPending = useCallback(() => {
-    const store = lifecycleRef.current;
-    if (!store) return;
-    const next: Record<string, number> = {};
-    for (const c of conversationsRef.current)
-      next[c.id] = store.getPending(c.id).length;
-    setPendingByConv(next);
+  const bumpPending = useCallback(() => setPendingVersion(v => v + 1), []);
+
+  // ---- Incoming typing TTL sweep (§49) ------------------------------------
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      let changed = false;
+      const next: Record<string, string[]> = {};
+      for (const [cid, seen] of typingSeenRef.current.entries()) {
+        const alive: string[] = [];
+        for (const [uid, at] of seen.entries()) {
+          if (now - at < TYPING_TTL_MS) alive.push(uid);
+          else seen.delete(uid);
+        }
+        alive.sort();
+        next[cid] = alive;
+        changed = true;
+      }
+      if (changed) setTypingByConv(next);
+    }, TYPING_SWEEP_MS);
+    return () => clearInterval(timer);
   }, []);
+
+  // ---- Presence grace (§50) -------------------------------------------------
+  const applyPresence = useCallback((userId: string, online: boolean) => {
+    const timers = presenceGraceTimersRef.current;
+    if (online) {
+      const pending = timers.get(userId);
+      if (pending) {
+        clearTimeout(pending);
+        timers.delete(userId);
+      }
+      setPresence(prev =>
+        prev[userId] === true ? prev : { ...prev, [userId]: true },
+      );
+      return;
+    }
+    // Offline: hold the flip for the grace window — a reconnect inside it
+    // cancels it, so blips never repaint the roster.
+    if (timers.has(userId)) return;
+    timers.set(
+      userId,
+      setTimeout(() => {
+        timers.delete(userId);
+        setPresence(prev =>
+          prev[userId] === false ? prev : { ...prev, [userId]: false },
+        );
+      }, PRESENCE_GRACE_MS),
+    );
+  }, []);
+
+  useEffect(
+    () => () => {
+      // Teardown: never leak grace timers across identities.
+      for (const t of presenceGraceTimersRef.current.values()) clearTimeout(t);
+      presenceGraceTimersRef.current.clear();
+      for (const t of typingStopTimersRef.current.values()) clearTimeout(t);
+      typingStopTimersRef.current.clear();
+    },
+    [],
+  );
 
   // Bootstrap: users + conversations + presence snapshot.
   useEffect(() => {
@@ -105,6 +193,7 @@ export function useChatSession(identity: Identity | null) {
         if (cancelled) return;
         setUsers(us);
         setConversations(convs);
+        setConversationsLoaded(true);
         const ids = [
           ...new Set(convs.flatMap(c => (c.members ?? []).map(m => m.userId))),
         ];
@@ -206,7 +295,7 @@ export function useChatSession(identity: Identity | null) {
               at: m.createdAt,
             }),
           );
-          refreshPending();
+          bumpPending();
           break;
         }
         case 'message.edited': {
@@ -214,31 +303,69 @@ export function useChatSession(identity: Identity | null) {
             messageId: string;
             content: string;
           };
+          // PERF (§48): scope to the event's conversation when known — an
+          // edit touches ONE message, never every cached transcript.
+          const targetCid =
+            typeof data['conversationId'] === 'string'
+              ? data['conversationId']
+              : '';
           setMessagesByConv(prev => {
-            const out: typeof prev = {};
-            for (const [cid, list] of Object.entries(prev)) {
-              out[cid] = list.map(m =>
-                m.id === messageId
-                  ? { ...m, content, editedAt: new Date().toISOString() }
-                  : m,
-              );
+            const editList = (list: ApiMessage[]): ApiMessage[] | null => {
+              let changed = false;
+              const next = list.map(m => {
+                if (m.id !== messageId) return m;
+                changed = true;
+                return { ...m, content, editedAt: new Date().toISOString() };
+              });
+              return changed ? next : null;
+            };
+            if (targetCid && prev[targetCid]) {
+              const next = editList(prev[targetCid]);
+              return next ? { ...prev, [targetCid]: next } : prev;
             }
-            return out;
+            const out: typeof prev = {};
+            let same = true;
+            for (const [cid, list] of Object.entries(prev)) {
+              const next = editList(list);
+              if (next) {
+                out[cid] = next;
+                same = false;
+              } else out[cid] = list;
+            }
+            return same ? prev : out;
           });
           break;
         }
         case 'message.deleted': {
           const { messageId } = data as { messageId: string };
+          const targetCid =
+            typeof data['conversationId'] === 'string'
+              ? data['conversationId']
+              : '';
           setMessagesByConv(prev => {
-            const out: typeof prev = {};
-            for (const [cid, list] of Object.entries(prev)) {
-              out[cid] = list.map(m =>
-                m.id === messageId
-                  ? { ...m, deletedAt: new Date().toISOString() }
-                  : m,
-              );
+            const deleteIn = (list: ApiMessage[]): ApiMessage[] | null => {
+              let changed = false;
+              const next = list.map(m => {
+                if (m.id !== messageId) return m;
+                changed = true;
+                return { ...m, deletedAt: new Date().toISOString() };
+              });
+              return changed ? next : null;
+            };
+            if (targetCid && prev[targetCid]) {
+              const next = deleteIn(prev[targetCid]);
+              return next ? { ...prev, [targetCid]: next } : prev;
             }
-            return out;
+            const out: typeof prev = {};
+            let same = true;
+            for (const [cid, list] of Object.entries(prev)) {
+              const next = deleteIn(list);
+              if (next) {
+                out[cid] = next;
+                same = false;
+              } else out[cid] = list;
+            }
+            return same ? prev : out;
           });
           break;
         }
@@ -251,7 +378,7 @@ export function useChatSession(identity: Identity | null) {
               : '';
           if (rejectedCmid) {
             lifecycleRef.current?.markFailed(rejectedCmid);
-            refreshPending();
+            bumpPending();
           }
           break;
         }
@@ -261,7 +388,7 @@ export function useChatSession(identity: Identity | null) {
           // realtime. Pure reducer — authoritative + QoS1-idempotent.
           // PERF: scope to the event's conversation when it is present and
           // cached; a no-op reducer result keeps the SAME references so
-          // nothing re-renders. Full sweep only as a fallback.
+          // nothing re-renders (§48: reaction on X updates X's row only).
           const targetCid =
             typeof data['conversationId'] === 'string'
               ? data['conversationId']
@@ -297,21 +424,33 @@ export function useChatSession(identity: Identity | null) {
             conversationId: string;
             userId: string;
           };
-          setTypingByConv(prev => {
-            const list = new Set(prev[conversationId] ?? []);
-            if (ev.eventType === 'typing.started') list.add(userId);
-            else list.delete(userId);
-            return { ...prev, [conversationId]: [...list] };
-          });
+          if (userId === selfUserId) break; // self-echo (shared topic) is noise
+          if (ev.eventType === 'typing.started') {
+            const seen = typingSeenRef.current.get(conversationId) ?? new Map();
+            seen.set(userId, Date.now());
+            typingSeenRef.current.set(conversationId, seen);
+            setTypingByConv(prev => {
+              const list = prev[conversationId] ?? [];
+              if (list.includes(userId)) return prev;
+              return { ...prev, [conversationId]: [...list, userId].sort() };
+            });
+          } else {
+            typingSeenRef.current.get(conversationId)?.delete(userId);
+            setTypingByConv(prev => {
+              const list = prev[conversationId] ?? [];
+              if (!list.includes(userId)) return prev;
+              return {
+                ...prev,
+                [conversationId]: list.filter(u => u !== userId),
+              };
+            });
+          }
           break;
         }
         case 'presence.online':
         case 'presence.offline': {
           const { userId } = data as { userId: string };
-          setPresence(prev => ({
-            ...prev,
-            [userId]: ev.eventType === 'presence.online',
-          }));
+          applyPresence(userId, ev.eventType === 'presence.online');
           break;
         }
         default:
@@ -362,10 +501,18 @@ export function useChatSession(identity: Identity | null) {
         .finally(() => client.disconnect());
       clientRef.current = null;
     };
-  }, [identity, refreshPending]);
+  }, [identity, applyPresence, bumpPending]);
 
   const openConversation = useCallback(
     async (conversationId: string) => {
+      // Only the FIRST open of a conversation shows the loading skeleton;
+      // re-opens keep cached content on screen while refreshing.
+      let showSkeleton = false;
+      setLoadingHistoryByConv(prev => {
+        if (prev[conversationId]) return prev;
+        showSkeleton = true;
+        return { ...prev, [conversationId]: true };
+      });
       try {
         const res = await api.getMessages(conversationId);
         lifecycleRef.current?.applyHistory(res.messages);
@@ -385,6 +532,13 @@ export function useChatSession(identity: Identity | null) {
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'history load failed');
+      } finally {
+        if (showSkeleton) {
+          setLoadingHistoryByConv(prev => ({
+            ...prev,
+            [conversationId]: false,
+          }));
+        }
       }
     },
     [identity],
@@ -438,9 +592,9 @@ export function useChatSession(identity: Identity | null) {
         content,
         replyToId,
       });
-      refreshPending();
+      bumpPending();
     },
-    [identity, refreshPending],
+    [identity, bumpPending],
   );
 
   /** Media message: upload already produced a durable storageKey — metadata
@@ -464,9 +618,9 @@ export function useChatSession(identity: Identity | null) {
         type: input.type,
         metadata: input.metadata,
       });
-      refreshPending();
+      bumpPending();
     },
-    [identity, refreshPending],
+    [identity, bumpPending],
   );
 
   const editMessage = useCallback(
@@ -528,9 +682,9 @@ export function useChatSession(identity: Identity | null) {
   const retryMessage = useCallback(
     async (clientMessageId: string) => {
       await lifecycleRef.current?.retry(clientMessageId);
-      refreshPending();
+      bumpPending();
     },
-    [refreshPending],
+    [bumpPending],
   );
 
   const sendTyping = useCallback(
@@ -585,9 +739,13 @@ export function useChatSession(identity: Identity | null) {
     [],
   );
 
+  const clearError = useCallback(() => setError(null), []);
+
   // Reconnect catch-up: after a drop, MQTT QoS1 redelivery can miss events
-  // published while offline. On transition → connected, re-fetch history for
-  // every conversation we have already opened; upsert dedupes by id.
+  // published while offline. On transition → connected, heal every opened
+  // conversation with a SEQ-SCOPED fetch (?after=<known watermark>) merged
+  // by id — a full latest-50 REPLACE used to destroy paginated history and
+  // drop messages that arrived mid-refetch (audit P2).
   const prevStatusRef = useRef<ConnectionStatus>('offline');
   useEffect(() => {
     const prev = prevStatusRef.current;
@@ -602,19 +760,32 @@ export function useChatSession(identity: Identity | null) {
     // realtime event, and QoS1 can drop list mutations published while
     // offline. Web heals the same way after reconnect.
     void refreshConversations();
-    const opened = Object.keys(messagesByConv);
+    const opened = [...openedConvsRef.current];
     if (opened.length === 0) return;
     let cancelled = false;
     void (async () => {
       for (const cid of opened) {
         try {
-          const res = await api.getMessages(cid);
+          // Watermark as of NOW (messages may keep arriving mid-heal; the
+          // upsert merge keeps anything newer).
+          const cached = messagesByConvRef.current[cid] ?? [];
+          const watermark = cached[cached.length - 1]?.sequence ?? 0;
+          const res = await api.getMessages(
+            cid,
+            watermark > 0 ? { after: watermark } : undefined,
+          );
           if (cancelled) return;
           lifecycleRef.current?.applyHistory(res.messages);
-          setMessagesByConv(prevMap => ({
-            ...prevMap,
-            [cid]: res.messages,
-          }));
+          setMessagesByConv(prevMap => {
+            const list = prevMap[cid] ?? [];
+            const known = new Set(list.map(m => m.id));
+            const fresh = res.messages.filter(m => !known.has(m.id));
+            if (fresh.length === 0) return prevMap;
+            const merged = [...list, ...fresh].sort(
+              (a, b) => a.sequence - b.sequence,
+            );
+            return { ...prevMap, [cid]: merged };
+          });
         } catch {
           // Keep stale data; next reconnect retries.
         }
@@ -623,21 +794,24 @@ export function useChatSession(identity: Identity | null) {
     return () => {
       cancelled = true;
     };
-  }, [status, messagesByConv, refreshConversations]);
+  }, [status, refreshConversations]);
 
   return useMemo(
     () => ({
       status,
       users,
       conversations,
+      conversationsLoaded,
       messagesByConv,
-      pendingByConv,
+      pendingVersion,
       typingByConv,
       presence,
       hasMoreByConv,
       loadingEarlierByConv,
+      loadingHistoryByConv,
       loadOlderMessages,
       error,
+      clearError,
       openConversation,
       sendMessage,
       sendMediaMessage,
@@ -654,14 +828,17 @@ export function useChatSession(identity: Identity | null) {
       status,
       users,
       conversations,
+      conversationsLoaded,
       messagesByConv,
-      pendingByConv,
+      pendingVersion,
       typingByConv,
       presence,
       hasMoreByConv,
       loadingEarlierByConv,
+      loadingHistoryByConv,
       loadOlderMessages,
       error,
+      clearError,
       openConversation,
       sendMessage,
       sendMediaMessage,

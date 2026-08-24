@@ -45,6 +45,7 @@ function render(messages: ApiMessage[]): TestRenderer.ReactTestRenderer {
     tree = TestRenderer.create(
       <ChatScreen
         title="Regression"
+        peerInitials="R"
         messages={messages}
         pending={[]}
         typingUsers={[]}
