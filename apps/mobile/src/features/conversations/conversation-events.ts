@@ -17,6 +17,7 @@ import type { ApiConversation, ApiMessage } from '../../lib/api';
 export type ConversationEventTypeName =
   | 'conversation.created'
   | 'conversation.updated'
+  | 'conversation.deleted'
   | 'conversation.member-joined'
   | 'conversation.member-left';
 
@@ -35,6 +36,27 @@ export function applyConversationEvent(
   data: unknown,
   selfUserId: string | null,
 ): ApiConversation[] {
+  // Deleted group (#28): tombstone event carries the pre-delete member
+  // snapshot — every relevant client removes the entity deterministically.
+  if (eventType === 'conversation.deleted') {
+    const raw = (data ?? {}) as Record<string, unknown>;
+    const deletedId = typeof raw['id'] === 'string' ? raw['id'] : '';
+    if (!deletedId) return list;
+    const memberIds = Array.isArray(raw['memberIds'])
+      ? (raw['memberIds'] as unknown[]).filter(
+          (x): x is string => typeof x === 'string',
+        )
+      : [];
+    if (
+      selfUserId !== null &&
+      memberIds.length > 0 &&
+      !memberIds.includes(selfUserId)
+    ) {
+      return list; // not my problem
+    }
+    return list.filter(c => c.id !== deletedId);
+  }
+
   const conversation = normalizeConversation(data);
   if (!conversation.id) return list;
 
