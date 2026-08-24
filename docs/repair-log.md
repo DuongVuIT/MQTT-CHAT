@@ -881,3 +881,84 @@ mobile jest 24/24 · test:e2e exit 0 (incl. 2 NEW boundary checks) ·
 browser E2E exit 0 ×2 · gateway SIGTERM drain verified live. NOT yet run this
 session: standalone build / verify:all / verify:completion (tracked as the
 audit's closing step).
+
+## 2026-08-24 — Session 5: audit fix wave 2 — every CONFIRMED finding closed
+
+The two confirmed P0s and all nine confirmed P1s from the wave-1 audit are
+now fixed, each with its regression. Ledger rows P0-184/185 and P1-186..194
+flip to VERIFIED; P0-044 returns to VERIFIED.
+
+# Bug #38 — Offline flush corrupted queued media (P0-184)
+
+- **Root cause**: `flushQueuedMessages()` rebuilt `message.send` from the
+  optimistic bubble text — type via the 📎 heuristic, metadata hardcoded
+  null — so an IMAGE queued offline reconnected as a metadata-less FILE
+  bubble with no storage key. `PendingMessage` had carried type/metadata
+  since #27; only the flush path ignored them.
+- **Fix**: ONE shared `republishPayload(pending)` builder used by BOTH the
+  manual retry button AND the reconnect flush — the paths cannot drift
+  again. Legacy pre-type pendings keep the 📎 heuristic.
+- **Regression**: queued IMAGE preserves type+storageKey; TEXT verbatim
+  incl. replyToId; legacy fallback covered (chat-store.test.ts).
+
+# Bug #39 — Commands were PUBACKed before processing (P0-185)
+
+- **Root cause**: mqtt.js auto-PUBACKs on delivery BEFORE any consumer code;
+  worker `stop()` waited without unsubscribing and processing early-returned
+  once stopped → commands arriving in the shutdown window were acked then
+  dropped forever. The "QoS1 redelivery covers crashes" comment was false
+  post-ack.
+- **Fix**: `packages/mqtt` gained a deferred-ack `handleMessage` option —
+  PUBACK goes out only after the handler resolves; a REJECTION skips the ack
+  so the broker redelivers (mqtt.js' internal done() ignores errors, so
+  nacking cannot crash). ChatWorker routes deliveries through it; `stop()`
+  leaves the $share group FIRST, drains, and nacks anything racing the
+  window. Poison payloads still resolve+ack deliberately.
+- **Verified LIVE**: 200 QoS1 commands under continuous traffic with TWO
+  worker SIGTERMs mid-stream + respawn → 200/200 canonical events, exactly
+  once each, zero loss/duplication/rejection.
+
+# Bug #40 — smoke.mjs could pass with broken dedup/history (P1-186)
+
+Exit code keyed off ONE check; dedup printed WARN and history printed FAIL
+without failing the run. All checks thread one `failed` flag now; downstream
+flows degrade to explicit FAIL(skipped).
+
+# Bug #41 — member-REMOVE had no domain guards (P1-187/188/189)
+
+- DIRECT pair self-leave stranded a membership-broken DM behind its pair key
+  forever (add-guard blocks repair) → removing from a DIRECT is 400 for ANY
+  actor.
+- Last-member leave hit the member-left contract (`memberCount ≥ 1`) INSIDE
+  the transaction → rollback → deterministic 500 loop → now 400 up front;
+  ending a group belongs to the tombstone DELETE flow.
+- Sole-admin removal orphaned an all-MEMBER group (every op ADMIN-gated) →
+  the oldest remaining HUMAN member is promoted ADMIN in the SAME
+  transaction; bots never inherit authority.
+
+# Bug #42 — createConversation trusted its input (P1-190/189)
+
+Unknown ids hit Prisma FK/P2002 as raw 500s; a creator outside memberIds
+minted a zero-ADMIN group. Mirrors #34: existence first (404 naming them),
+then structure (duplicates 400, creator-must-be-a-member 400). Seed aligns
+conv-random (alice becomes ADMIN).
+
+# Bug #43 — mobile typing spammed QoS1 commands (P1-192)
+
+One command PER KEYSTROKE with no auto-stop. Now ≥1s throttle per
+conversation + deterministic auto-stop after 2s silence + immediate stop on
+submit — parity with web Composer.
+
+# Bug #44 — web store errors were invisible; harness leaked on failure
+
+- ErrorBanner renders the previously write-only `error` state (invariant
+  #16); dismissible, auto-clears after 8s (P1-191).
+- Mobile jest suite gated into `validate` via root `test:mobile` (P1-193).
+- test-stack: SIGINT/SIGTERM run the real teardown (--keep persists);
+  per-suite watchdog (default 120s); all four fixture suites register
+  exact-ID cleanup thunks that run on success AND failure paths (P1-194,
+  bug #25 class).
+
+**Executed verification** (this tree): validate incl. build + both unit
+suites · full test:e2e exit 0 (90 checks PASS incl. 9 new boundary/
+regression checks) · live SIGTERM zero-loss probe PASS.
