@@ -303,29 +303,55 @@ export class ChatController {
         where: { directPairKey },
         include: { members: true },
       });
-      if (existing) return { conversation: existing, reused: true };
+      if (existing) {
+        // The UNIQUE key makes a second row for this pair impossible, so a
+        // keyed row with missing membership (partially-deleted twin) must be
+        // REPAIRED in place, never recreated (audit P2: a memberless orphan
+        // handed to clients as `reused:true` renders a dead DM row).
+        if (existing.members.length === 2) return { conversation: existing, reused: true };
+        const repaired = await this.repairDirectMembership(existing.id, [a, b]);
+        return { conversation: repaired, reused: true, repaired: true };
+      }
 
       // Legacy adoption (duplicate-Alice root cause): rows created before
       // the pair-key contract — notably the seeded demo DMs — carry a NULL
       // key, which the UNIQUE index cannot dedupe and findUnique cannot
       // match. Adopt such a twin instead of creating a second conversation
-      // for the same pair: stamp the canonical key and reuse the row.
+      // for the same pair: stamp the canonical key, restore any missing
+      // membership, and reuse the row. Membership ⊆ {a,b} is the ownership
+      // test (0/1-member shells from failed member writes are adoptable;
+      // rows containing a third user are someone else's data — leave them).
       const legacy = await this.prisma.conversation.findFirst({
         where: {
           type: "DIRECT",
           directPairKey: null,
           members: { every: { userId: { in: [a, b] } } },
-          AND: [{ members: { some: { userId: a } } }, { members: { some: { userId: b } } }],
         },
         orderBy: { createdAt: "asc" },
         include: { members: true },
       });
-      if (legacy && legacy.members.length === 2) {
+      if (legacy) {
         try {
-          const adopted = await this.prisma.conversation.update({
-            where: { id: legacy.id },
-            data: { directPairKey },
-            include: { members: true },
+          const adopted = await this.prisma.$transaction(async (tx) => {
+            await tx.conversation.update({
+              where: { id: legacy.id },
+              data: { directPairKey },
+            });
+            const have = new Set(legacy.members.map((m) => m.userId));
+            const missing = [a, b].filter((id) => !have.has(id));
+            if (missing.length > 0) {
+              await tx.conversationMember.createMany({
+                data: missing.map((userId) => ({
+                  conversationId: legacy.id,
+                  userId,
+                  role: "MEMBER",
+                })),
+              });
+            }
+            return tx.conversation.findUniqueOrThrow({
+              where: { id: legacy.id },
+              include: { members: true },
+            });
           });
           return { conversation: adopted, reused: true, adoptedLegacy: true };
         } catch (err) {
@@ -368,6 +394,31 @@ export class ChatController {
       throw err;
     }
     return { conversation, reused: false };
+  }
+
+  /** Restore missing membership on a keyed DIRECT row (see fast-path repair). */
+  private async repairDirectMembership(conversationId: string, pair: [string, string]) {
+    return this.prisma.$transaction(async (tx) => {
+      const members = await tx.conversationMember.findMany({
+        where: { conversationId },
+        select: { userId: true },
+      });
+      const have = new Set(members.map((m) => m.userId));
+      const missing = pair.filter((userId) => !have.has(userId));
+      if (missing.length > 0) {
+        await tx.conversationMember.createMany({
+          data: missing.map((userId) => ({
+            conversationId,
+            userId,
+            role: "MEMBER",
+          })),
+        });
+      }
+      return tx.conversation.findUniqueOrThrow({
+        where: { id: conversationId },
+        include: { members: true },
+      });
+    });
   }
 
   private async createWithOutboxEvent(
