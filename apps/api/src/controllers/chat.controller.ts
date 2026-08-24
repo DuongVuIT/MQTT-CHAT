@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Inject,
   NotFoundException,
@@ -13,6 +15,7 @@ import { z } from "zod";
 import {
   buildEventEnvelope,
   conversationCreatedDataSchema,
+  conversationDeletedDataSchema,
   conversationMemberJoinedDataSchema,
   conversationMemberLeftDataSchema,
   EVENT_TOPICS,
@@ -137,17 +140,68 @@ export class ChatController {
     return { deleted: true };
   }
 
-  /** Test-fixture teardown: conversation cascade removes members+messages+reactions. */
+  /**
+   * Delete a GROUP (tombstone, repair-log #28): the row keeps its history
+   * (deletedAt/deletedBy) but disappears from every list and rejects further
+   * sends. Permission model (#38): only a member with role ADMIN (the
+   * creator) may delete. The canonical conversation.deleted event carries
+   * the pre-delete member snapshot so every client removes it in realtime.
+   */
   @Delete("conversations/:id")
-  async deleteConversation(@Param("id") id: string) {
-    try {
-      await this.prisma.conversation.delete({ where: { id } });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2025") {
-        return { deleted: true, absent: true };
-      }
-      throw err;
+  async deleteConversation(@Param("id") id: string, @Query("actor") actorUserId?: string) {
+    if (!actorUserId) {
+      throw new BadRequestException(apiError("BAD_REQUEST", "Missing actor query parameter"));
     }
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { members: { select: { userId: true, role: true } } },
+    });
+    if (!conversation || conversation.deletedAt) {
+      // Idempotent: deleting an absent/already-deleted group succeeds.
+      return { deleted: true, absent: true };
+    }
+    if (conversation.type !== "GROUP") {
+      throw new BadRequestException(
+        apiError("BAD_REQUEST", "DIRECT conversations cannot be deleted"),
+      );
+    }
+    const actor = conversation.members.find((m) => m.userId === actorUserId);
+    if (!actor || actor.role !== "ADMIN") {
+      throw new ForbiddenException(
+        apiError("FORBIDDEN", "Only a group admin can delete the group"),
+      );
+    }
+
+    const deletedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.conversation.update({
+        where: { id },
+        data: { deletedAt, deletedBy: actorUserId },
+      });
+      const event = buildEventEnvelope({
+        eventType: "conversation.deleted",
+        origin: { type: "user", id: actorUserId },
+        actor: { userId: actorUserId },
+        conversationId: id,
+        data: conversationDeletedDataSchema.parse({
+          id,
+          title: conversation.title,
+          deletedBy: actorUserId,
+          deletedAt: deletedAt.toISOString(),
+          lastSequence: conversation.lastSequence,
+          memberIds: conversation.members.map((m) => m.userId),
+        }),
+      });
+      await tx.outboxEvent.create({
+        data: {
+          eventType: "conversation.deleted",
+          aggregateType: "Conversation",
+          aggregateId: id,
+          topic: EVENT_TOPICS.conversationDeleted,
+          payload: toPrismaJson(event),
+        },
+      });
+    });
     return { deleted: true };
   }
 
@@ -156,7 +210,8 @@ export class ChatController {
   @Get("conversations")
   async listConversations(@Query("userId") userId?: string) {
     const conversations = await this.prisma.conversation.findMany({
-      where: userId ? { members: { some: { userId } } } : undefined,
+      // Deleted groups are tombstoned, never listed (#28).
+      where: { deletedAt: null, ...(userId ? { members: { some: { userId } } } : {}) },
       include: {
         members: { select: { userId: true, role: true, lastReadSequence: true } },
         messages: {
@@ -309,7 +364,8 @@ export class ChatController {
         },
       },
     });
-    if (!conversation) {
+    // Tombstoned groups are GONE for every read path (#28).
+    if (!conversation || conversation.deletedAt) {
       throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
     }
     return { conversation };
@@ -318,12 +374,26 @@ export class ChatController {
   @Post("conversations/:id/members")
   async addMembers(
     @Param("id") id: string,
+    @Query("actor") actorUserId: string | undefined,
     @Body(new ZodValidationPipe(addMembersSchema)) body: unknown,
   ) {
     const data = body as z.infer<typeof addMembersSchema>;
-    const conversation = await this.prisma.conversation.findUnique({ where: { id } });
-    if (!conversation) {
+    if (!actorUserId) {
+      throw new BadRequestException(apiError("BAD_REQUEST", "Missing actor query parameter"));
+    }
+    // Permission model (#38): membership CHANGES derive from the immutable
+    // member role — only an ADMIN may add people to a group.
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { members: { select: { userId: true, role: true } } },
+    });
+    // Tombstoned groups accept no new members (#28).
+    if (!conversation || conversation.deletedAt) {
       throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
+    }
+    const actor = conversation.members.find((m) => m.userId === actorUserId);
+    if (!actor || actor.role !== "ADMIN") {
+      throw new ForbiddenException(apiError("FORBIDDEN", "Only a group admin can add members"));
     }
     // Membership change + canonical outbox event in ONE transaction —
     // clients reconcile from the event, never a manual reload.
@@ -334,7 +404,7 @@ export class ChatController {
       });
       return this.emitConversationMembersChanged(tx, {
         conversationId: id,
-        actorUserId: conversation.createdBy,
+        actorUserId,
         kind: "joined",
         changedUserIds: data.userIds,
       });
@@ -342,17 +412,45 @@ export class ChatController {
     return { added: data.userIds.length, conversation: result };
   }
 
+  /**
+   * Remove a member (#37). Permission model (#38): an ADMIN may remove anyone;
+   * any member may remove THEMSELVES (leave). The removed user's own client
+   * receives canonical member-left and drops the entity without a reload.
+   */
   @Delete("conversations/:id/members/:userId")
-  async removeMember(@Param("id") id: string, @Param("userId") userId: string) {
-    const conversation = await this.prisma.conversation.findUnique({ where: { id } });
-    if (!conversation) {
+  async removeMember(
+    @Param("id") id: string,
+    @Param("userId") userId: string,
+    @Query("actor") actorUserId: string | undefined,
+  ) {
+    if (!actorUserId) {
+      throw new BadRequestException(apiError("BAD_REQUEST", "Missing actor query parameter"));
+    }
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id },
+      include: { members: { select: { userId: true, role: true } } },
+    });
+    if (!conversation || conversation.deletedAt) {
       throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
+    }
+    const actor = conversation.members.find((m) => m.userId === actorUserId);
+    if (!actor) {
+      throw new ForbiddenException(apiError("FORBIDDEN", "Not a member of this group"));
+    }
+    if (actorUserId !== userId && actor.role !== "ADMIN") {
+      throw new ForbiddenException(
+        apiError("FORBIDDEN", "Only a group admin can remove other members"),
+      );
+    }
+    const target = conversation.members.some((m) => m.userId === userId);
+    if (!target) {
+      return { removed: false, absent: true };
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.conversationMember.deleteMany({ where: { conversationId: id, userId } });
       await this.emitConversationMembersChanged(tx, {
         conversationId: id,
-        actorUserId: conversation.createdBy,
+        actorUserId,
         kind: "left",
         changedUserIds: [userId],
       });
