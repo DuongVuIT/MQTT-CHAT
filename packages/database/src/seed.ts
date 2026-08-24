@@ -160,7 +160,13 @@ async function main(): Promise<void> {
     await prisma.conversationMember.upsert({
       where: { conversationId_userId: { conversationId: "conv-random", userId } },
       update: {},
-      create: { conversationId: "conv-random", userId },
+      // conv-random's creator is its ADMIN — the API refuses groups whose
+      // creator is not a member (zero-ADMIN groups are unmanageable).
+      create: {
+        conversationId: "conv-random",
+        userId,
+        role: userId === "alice" ? "ADMIN" : "MEMBER",
+      },
     });
   }
 

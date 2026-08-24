@@ -254,6 +254,35 @@ export class ChatController {
   async createConversation(@Body(new ZodValidationPipe(createConversationSchema)) body: unknown) {
     const data = body as z.infer<typeof createConversationSchema>;
 
+    // Boundary validation mirroring addMembers (#190): duplicate ids, an
+    // unknown creator/member, or a creator outside the initial membership
+    // must fail deterministically here — never as Prisma P2002/P2003 leaking
+    // a 500 from the global exception filter. Existence is checked BEFORE
+    // structure (a 404 naming the missing identity is the most specific
+    // diagnostic); a creator who is not a member would mint a group with no
+    // ADMIN row (all management ops are ADMIN-gated) — orphaned from its
+    // first second.
+    const candidateIds = [...new Set([...data.memberIds, data.createdBy])];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: candidateIds } },
+      select: { id: true },
+    });
+    const known = new Set(users.map((u) => u.id));
+    const unknown = candidateIds.filter((userId) => !known.has(userId));
+    if (unknown.length > 0) {
+      throw new NotFoundException(
+        apiError("USER_NOT_FOUND", `Unknown userId(s): ${unknown.join(", ")}`),
+      );
+    }
+    if (new Set(data.memberIds).size !== data.memberIds.length) {
+      throw new BadRequestException(
+        apiError("BAD_REQUEST", "memberIds contains duplicate userIds"),
+      );
+    }
+    if (!data.memberIds.includes(data.createdBy)) {
+      throw new BadRequestException(apiError("BAD_REQUEST", "createdBy must be one of memberIds"));
+    }
+
     // DIRECT conversations are unique per user pair via the canonical
     // `directPairKey` (sorted "a:b", computed SERVER-SIDE — never trusted
     // from the client) and a DB UNIQUE index. The pair key is derived from

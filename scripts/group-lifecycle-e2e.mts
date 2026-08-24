@@ -224,6 +224,64 @@ async function main() {
   const bRole = xferDetail.conversation?.members?.find((m) => m.userId === B)?.role;
   check(bRole === "ADMIN", "oldest remaining member promoted to ADMIN", String(bRole));
 
+  // ---- 3d. CREATE boundary validation --------------------------------------
+  // Mirrors the member-ADD fix: duplicate ids, unknown users, and a creator
+  // outside the initial membership fail at the boundary — never as a Prisma
+  // P2002/P2003 leaking a 500 (and never a zero-ADMIN group).
+  const dupCreate = await fetch(`${API}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "GROUP", title: `dup-${run}`, createdBy: A, memberIds: [A, A] }),
+  });
+  check(
+    dupCreate.status === 400,
+    "create with duplicate memberIds → 400",
+    String(dupCreate.status),
+  );
+
+  const ghostMemberCreate = await fetch(`${API}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "GROUP",
+      title: `ghost-${run}`,
+      createdBy: A,
+      memberIds: [A, `u-${run}-ghost`],
+    }),
+  });
+  check(
+    ghostMemberCreate.status === 404,
+    "create with unknown memberId → 404",
+    String(ghostMemberCreate.status),
+  );
+
+  const outsiderCreate = await fetch(`${API}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "GROUP", title: `out-${run}`, createdBy: A, memberIds: [B, C] }),
+  });
+  check(
+    outsiderCreate.status === 400,
+    "create with createdBy outside memberIds → 400",
+    String(outsiderCreate.status),
+  );
+
+  const ghostCreatorCreate = await fetch(`${API}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "GROUP",
+      title: `gc-${run}`,
+      createdBy: `u-${run}-ghost`,
+      memberIds: [A, B],
+    }),
+  });
+  check(
+    ghostCreatorCreate.status === 404,
+    "create with unknown createdBy → 404",
+    String(ghostCreatorCreate.status),
+  );
+
   // ---- 4. Owner deletes → canonical tombstone everywhere ------------------
   const deleteRes = await fetch(`${API}/conversations/${conv.id}?actor=${encodeURIComponent(A)}`, {
     method: "DELETE",
