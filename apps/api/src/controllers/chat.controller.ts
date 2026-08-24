@@ -288,6 +288,7 @@ export class ChatController {
           members: { every: { userId: { in: [a, b] } } },
           AND: [{ members: { some: { userId: a } } }, { members: { some: { userId: b } } }],
         },
+        orderBy: { createdAt: "asc" },
         include: { members: true },
       });
       if (legacy && legacy.members.length === 2) {
