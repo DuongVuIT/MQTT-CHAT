@@ -142,7 +142,7 @@ export const MessageBubble = memo(function MessageBubble({
         )}
 
         <div
-          className={`relative rounded-2xl px-3.5 py-2 text-sm ${
+          className={`relative rounded-2xl px-3.5 py-2 text-sm animate-bubble-in ${
             isOwn
               ? "bg-indigo-600 text-white"
               : "bg-white text-slate-800 shadow-sm dark:bg-slate-800 dark:text-slate-100"

@@ -319,7 +319,7 @@ export function MessageList({
           onClick={() => {
             scrollToLatest("smooth");
           }}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white shadow-lg hover:bg-indigo-500"
+          className="animate-pill-nudge absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white shadow-lg hover:bg-indigo-500"
         >
           ↓ {unreadCount} new message{unreadCount === 1 ? "" : "s"}
         </button>

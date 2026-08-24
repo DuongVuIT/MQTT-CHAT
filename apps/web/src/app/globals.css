@@ -40,3 +40,41 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- Chat motion (subtle, reduced-motion aware) ------------------------ */
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-bubble-in {
+  animation: bubble-in 180ms ease-out both;
+}
+
+@keyframes pill-nudge {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, -3px);
+  }
+}
+
+.animate-pill-nudge {
+  animation: pill-nudge 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bubble-in,
+  .animate-pill-nudge {
+    animation: none;
+  }
+}
