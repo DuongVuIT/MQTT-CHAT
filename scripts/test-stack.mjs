@@ -270,6 +270,9 @@ const SUITES = [
   // TypeScript suite: media MIME normalization (image/jpg alias) + reply
   // lifecycle incl. deterministic message.rejected failure (#26, #27).
   "scripts/media-reply-e2e.mts",
+  // Full GROUP lifecycle: create → permission model → admin tombstone delete
+  // → canonical conversation.deleted to every member → post-delete rejects.
+  "scripts/group-lifecycle-e2e.mts",
 ];
 
 /** .mts suites are TypeScript — run them through tsx. */
