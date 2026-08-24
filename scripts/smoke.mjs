@@ -5,6 +5,10 @@
  *
  * Run from repo root:  node scripts/smoke.mjs
  * (mqtt resolves from the workspace; API must be running on :3001.)
+ *
+ * Exit code reflects EVERY check: any FAIL/WARN fails the run (P1-186) —
+ * previously only the reused-members contract affected the exit code, so a
+ * broken dedup or history path could pass `test:e2e`.
  */
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -15,6 +19,13 @@ const mqtt = createRequire(new URL("../packages/mqtt/src/index.ts", import.meta.
 const API = process.env.API_URL ?? "http://localhost:3001/api";
 const MQTT_URL = process.env.MQTT_URL ?? "mqtt://localhost:1883";
 const NS = process.env.MQTT_TOPIC_NAMESPACE ?? "chat/v1"; // env-fenced E2E namespace
+
+let failed = false;
+/** Record one named check; every failing check fails the whole run. */
+function check(ok, label, detail = "") {
+  console.log(`${ok ? "PASS" : "FAIL"} ${label}${ok || !detail ? `` : `: ${detail}`}`);
+  if (!ok) failed = true;
+}
 
 const conversations = await fetch(`${API}/conversations`).then((r) => r.json());
 const list = Array.isArray(conversations)
@@ -62,90 +73,114 @@ async function waitFor(pred, label, timeoutMs = 15_000) {
 
 // ---- Flow A: plain message ----
 const cmid = randomUUID();
-await publishCommand(`${NS}/commands/message/send`, {
-  requestId: randomUUID(),
-  commandType: "message.send",
-  version: 1,
-  timestamp: new Date().toISOString(),
-  actor: { userId: "duong", deviceId: "smoke" },
-  clientMessageId: cmid,
-  data: {
-    conversationId: general.id,
+let flowAOk = false;
+let botPongContent = null;
+try {
+  await publishCommand(`${NS}/commands/message/send`, {
+    requestId: randomUUID(),
+    commandType: "message.send",
+    version: 1,
+    timestamp: new Date().toISOString(),
+    actor: { userId: "duong", deviceId: "smoke" },
     clientMessageId: cmid,
-    type: "TEXT",
-    content: "hello from smoke",
-    replyToId: null,
-    metadata: null,
-  },
-});
-const created = await waitFor(
-  (e) => e.eventType === "message.created" && e.data?.clientMessageId === cmid,
-  "message.created",
-);
-console.log("PASS flow A: message.created sequence =", created.data.sequence);
+    data: {
+      conversationId: general.id,
+      clientMessageId: cmid,
+      type: "TEXT",
+      content: "hello from smoke",
+      replyToId: null,
+      metadata: null,
+    },
+  });
+  const created = await waitFor(
+    (e) => e.eventType === "message.created" && e.data?.clientMessageId === cmid,
+    "message.created",
+  );
+  console.log("flow A: message.created sequence =", created.data.sequence);
+  flowAOk = true;
+} catch (error) {
+  check(false, "flow A: message.created", error.message);
+}
+check(flowAOk, "flow A: command → canonical event");
 
 // ---- Dedup check: same clientMessageId again ----
-await publishCommand(`${NS}/commands/message/send`, {
-  requestId: randomUUID(),
-  commandType: "message.send",
-  version: 1,
-  timestamp: new Date().toISOString(),
-  actor: { userId: "duong", deviceId: "smoke" },
-  clientMessageId: cmid,
-  data: {
-    conversationId: general.id,
+if (flowAOk) {
+  await publishCommand(`${NS}/commands/message/send`, {
+    requestId: randomUUID(),
+    commandType: "message.send",
+    version: 1,
+    timestamp: new Date().toISOString(),
+    actor: { userId: "duong", deviceId: "smoke" },
     clientMessageId: cmid,
-    type: "TEXT",
-    content: "hello from smoke",
-    replyToId: null,
-    metadata: null,
-  },
-});
-await new Promise((r) => setTimeout(r, 2500));
-const dupes = received.filter(
-  (e) => e.eventType === "message.created" && e.data?.clientMessageId === cmid,
-);
-console.log(
-  dupes.length === 1 ? "PASS dedup: single canonical event" : `WARN dedup: ${dupes.length} events`,
-);
+    data: {
+      conversationId: general.id,
+      clientMessageId: cmid,
+      type: "TEXT",
+      content: "hello from smoke",
+      replyToId: null,
+      metadata: null,
+    },
+  });
+  await new Promise((r) => setTimeout(r, 2500));
+  const dupes = received.filter(
+    (e) => e.eventType === "message.created" && e.data?.clientMessageId === cmid,
+  );
+  check(dupes.length === 1, "dedup: single canonical event", `${dupes.length} events`);
+} else {
+  check(false, "dedup: single canonical event", "skipped — flow A failed");
+}
 
 // ---- Flow G: bot /ping ----
-const pingCmid = randomUUID();
-await publishCommand(`${NS}/commands/message/send`, {
-  requestId: randomUUID(),
-  commandType: "message.send",
-  version: 1,
-  timestamp: new Date().toISOString(),
-  actor: { userId: "duong", deviceId: "smoke" },
-  clientMessageId: pingCmid,
-  data: {
-    conversationId: general.id,
-    clientMessageId: pingCmid,
-    type: "TEXT",
-    content: "/ping",
-    replyToId: null,
-    metadata: null,
-  },
-});
-const pong = await waitFor(
-  (e) =>
-    e.eventType === "message.created" &&
-    e.origin?.type === "bot" &&
-    typeof e.data?.content === "string" &&
-    e.data.content.toLowerCase().includes("pong"),
-  "bot pong",
-  20_000,
-);
-console.log("PASS flow G: bot replied:", pong.data.content);
+if (flowAOk) {
+  const pingCmid = randomUUID();
+  try {
+    await publishCommand(`${NS}/commands/message/send`, {
+      requestId: randomUUID(),
+      commandType: "message.send",
+      version: 1,
+      timestamp: new Date().toISOString(),
+      actor: { userId: "duong", deviceId: "smoke" },
+      clientMessageId: pingCmid,
+      data: {
+        conversationId: general.id,
+        clientMessageId: pingCmid,
+        type: "TEXT",
+        content: "/ping",
+        replyToId: null,
+        metadata: null,
+      },
+    });
+    const pong = await waitFor(
+      (e) =>
+        e.eventType === "message.created" &&
+        e.origin?.type === "bot" &&
+        typeof e.data?.content === "string" &&
+        e.data.content.toLowerCase().includes("pong"),
+      "bot pong",
+      20_000,
+    );
+    console.log("flow G: bot replied:", pong.data.content);
+    botPongContent = pong.data.content;
+  } catch (error) {
+    check(false, "flow G: bot replied", error.message);
+  }
+  check(botPongContent !== null, "flow G: bot reply through chat-worker");
+} else {
+  check(false, "flow G: bot reply through chat-worker", "skipped — flow A failed");
+}
 
 // ---- History via HTTP ----
-const history = await fetch(`${API}/conversations/${general.id}/messages?limit=50`).then((r) =>
-  r.json(),
-);
-const items = history.messages ?? history.data ?? history.items ?? history;
-const hasSmoke = JSON.stringify(items).includes("hello from smoke");
-const hasPong = JSON.stringify(items).includes(pong.data.content.slice(0, 10));
-console.log(hasSmoke && hasPong ? "PASS history: messages persisted & queryable" : "FAIL history");
+if (flowAOk && botPongContent !== null) {
+  const history = await fetch(`${API}/conversations/${general.id}/messages?limit=50`).then((r) =>
+    r.json(),
+  );
+  const items = history.messages ?? history.data ?? history.items ?? history;
+  const hasSmoke = JSON.stringify(items).includes("hello from smoke");
+  const hasPong = JSON.stringify(items).includes(botPongContent.slice(0, 10));
+  check(hasSmoke && hasPong, "history: messages persisted & queryable");
+} else {
+  check(false, "history: messages persisted & queryable", "skipped — earlier flow failed");
+}
 
 // Regression: reused DIRECT conversation MUST include members (Sidebar reads
 // c.members — a payload without it crashed the whole chat page).
@@ -156,12 +191,8 @@ const reuse = await fetch(`${API}/conversations`, {
 }).then((r) => r.json());
 const membersOk =
   Array.isArray(reuse.conversation?.members) && reuse.conversation.members.length >= 2;
-console.log(
-  membersOk
-    ? "PASS contract: reused conversation includes members"
-    : "FAIL contract: reused conversation missing members",
-);
+check(membersOk, "contract: reused conversation includes members");
 
 client.end(true);
 console.log("SMOKE DONE");
-process.exit(membersOk ? 0 : 1);
+process.exit(failed ? 1 : 0);
