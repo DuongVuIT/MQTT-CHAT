@@ -58,6 +58,11 @@ export interface ChatState {
     opts: { sequence: number; preview: string | null; at: string },
   ) => void;
   setActiveConversation: (id: string | null) => void;
+  /**
+   * conversation.deleted (#28): drop EVERY trace — list entity, message
+   * cache, pending sends, typing state — and close the chat if it was open.
+   */
+  removeConversation: (conversationId: string) => void;
   setMessages: (conversationId: string, messages: ApiMessage[], hasMore: boolean) => void;
   prependMessages: (conversationId: string, messages: ApiMessage[], hasMore: boolean) => void;
   upsertMessage: (message: ApiMessage) => void;
@@ -134,6 +139,22 @@ export const useChatStore = create<ChatState>((set) => ({
       }),
     })),
   setActiveConversation: (id) => set({ activeConversationId: id }),
+
+  removeConversation: (conversationId) =>
+    set((s) => {
+      const next: Partial<ChatState> = {
+        conversations: s.conversations.filter((c) => c.id !== conversationId),
+        messagesByConversation: Object.fromEntries(
+          Object.entries(s.messagesByConversation).filter(([cid]) => cid !== conversationId),
+        ),
+        pendingMessages: s.pendingMessages.filter((p) => p.conversationId !== conversationId),
+        typingUsers: Object.fromEntries(
+          Object.entries(s.typingUsers).filter(([cid]) => cid !== conversationId),
+        ),
+      };
+      if (s.activeConversationId === conversationId) next.activeConversationId = null;
+      return next;
+    }),
 
   setMessages: (conversationId, messages, hasMore) =>
     set((s) => ({

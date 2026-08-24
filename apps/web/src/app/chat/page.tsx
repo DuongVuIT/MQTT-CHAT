@@ -299,6 +299,18 @@ function handleEvent(envelope: EventEnvelope): void {
         editedAt: envelope.timestamp,
       });
       break;
+    case "conversation.deleted": {
+      // Tombstone event (#28): remove EVERY trace without reload; an open
+      // chat on this conversation closes safely (active id → null).
+      const deletedId = String(data["id"] ?? conversationId);
+      const deletedMemberIds = Array.isArray(data["memberIds"])
+        ? (data["memberIds"] as unknown[]).map(String)
+        : [];
+      if (!deletedMemberIds.length || deletedMemberIds.includes(selfUserId)) {
+        s.removeConversation(deletedId);
+      }
+      break;
+    }
     case "message.deleted":
       s.removeMessage(String(data["messageId"]));
       break;

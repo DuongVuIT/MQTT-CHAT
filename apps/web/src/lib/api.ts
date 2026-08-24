@@ -96,11 +96,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  addMembers: (conversationId: string, userIds: string[]) =>
-    request<{ added: number }>(`/conversations/${conversationId}/members`, {
-      method: "POST",
-      body: JSON.stringify({ userIds }),
-    }),
+  addMembers: (conversationId: string, userIds: string[], actorUserId: string) =>
+    request<{ added: number }>(
+      `/conversations/${conversationId}/members?actor=${encodeURIComponent(actorUserId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ userIds }),
+      },
+    ),
+  /** Remove another member (admin) or leave self — canonical member-left. */
+  removeMember: (conversationId: string, userId: string, actorUserId: string) =>
+    request<{ removed: boolean }>(
+      `/conversations/${conversationId}/members/${encodeURIComponent(userId)}?actor=${encodeURIComponent(actorUserId)}`,
+      { method: "DELETE" },
+    ),
+  /** Delete a GROUP (tombstone; admin-only). Canonical event reconciles all. */
+  deleteGroup: (conversationId: string, actorUserId: string) =>
+    request<{ deleted: boolean }>(
+      `/conversations/${conversationId}?actor=${encodeURIComponent(actorUserId)}`,
+      { method: "DELETE" },
+    ),
   getMessages: (
     conversationId: string,
     opts?: { before?: number; after?: number; limit?: number },
