@@ -173,8 +173,10 @@ export function MessageList({
       setUnreadCount(0);
     } else if (isAppend) {
       if (stickToBottomRef.current) {
-        // Follow live traffic while pinned (§35).
-        bottomRef.current?.scrollIntoView({ block: "end" });
+        // Follow live traffic while pinned (§35) — scroll the CONTAINER to
+        // its true max (scrollIntoView stops at the padding edge, leaving a
+        // permanent ~16px gap under the latest message).
+        if (el) el.scrollTop = el.scrollHeight;
       } else {
         // User is reading history — never yank the viewport (§35).
         setUnreadCount((c) => c + Math.max(1, count - prevCountRef.current));
@@ -190,15 +192,18 @@ export function MessageList({
   }, [messages, conversationId]);
 
   // Keep the viewport pinned while content settles (images loading, fonts
-  // swapping) — but ONLY while the reader is actually at the bottom; reading
-  // history is never yanked (§34/§35). A plain jump-once loses ~100px per
-  // late-loading image; the observer re-pins until the user scrolls away.
+  // swapping) — but ONLY while the reader is actually near the bottom,
+  // computed LIVE at callback time: the stickToBottomRef can be stale for a
+  // programmatic scroll whose event hasn't fired yet, and re-pinning on a
+  // prepend would fight the anchor compensation (§34/§35/§37).
   useEffect(() => {
     const content = contentRef.current;
     if (!content) return;
     const observer = new ResizeObserver(() => {
       const el = containerRef.current;
-      if (el && stickToBottomRef.current) {
+      if (!el) return;
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distance < FOLLOW_THRESHOLD) {
         el.scrollTop = el.scrollHeight;
       }
     });
@@ -244,7 +249,7 @@ export function MessageList({
   const scrollToLatest = (behavior: ScrollBehavior): void => {
     stickToBottomRef.current = true;
     setUnreadCount(0);
-    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+    containerRef.current?.scrollTo({ top: containerRef.current.scrollHeight, behavior });
   };
 
   const loadOlder = async (): Promise<void> => {

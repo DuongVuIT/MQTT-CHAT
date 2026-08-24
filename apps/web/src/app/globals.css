@@ -116,9 +116,14 @@ body {
   background-color: var(--ink-3);
 }
 
-/* The transcript never rubber-bands the whole page (§ scroll containment). */
+/* The transcript never rubber-bands the whole page (§ scroll containment).
+   overflow-anchor: none — the list compensates prepends ITSELF (exact
+   height-delta in a layout effect, §37); the browser's native scroll
+   anchoring would adjust scrollTop FIRST and the manual compensation would
+   then DOUBLE it, slamming the viewport to the bottom. */
 .scroll-contain {
   overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
