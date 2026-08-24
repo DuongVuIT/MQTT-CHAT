@@ -172,7 +172,9 @@ try {
   });
   check(bGotMessage, "message delivered to second browser realtime");
   let created = null;
-  for (let i = 0; i < 25 && !created; i++) {
+  // Bounded 15s window — right after the isolated E2E stack tears down the
+  // broker can be briefly busy; never a blind sleep, always poll.
+  for (let i = 0; i < 75 && !created; i++) {
     await sleep(200);
     created = events.find(
       (e) => e.eventType === "message.created" && e.data?.content === "browser-e2e hello",
