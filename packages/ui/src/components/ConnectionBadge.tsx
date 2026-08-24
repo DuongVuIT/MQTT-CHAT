@@ -24,7 +24,24 @@ const tones: Record<ConnectionState, string> = {
   error: "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300",
 };
 
+/**
+ * Connection state, product-subtle (phase-2 §29): normal operation renders a
+ * tiny status dot only — a full "Connected" pill must never dominate the
+ * header. Degraded states escalate to a labelled pill.
+ */
 export function ConnectionBadge({ state, className }: ConnectionBadgeProps) {
+  if (state === "connected") {
+    return (
+      <span
+        role="status"
+        aria-label="Connected"
+        aria-live="polite"
+        className={cn("inline-flex h-2.5 w-2.5 items-center justify-center", className)}
+      >
+        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-emerald-500" />
+      </span>
+    );
+  }
   return (
     <span
       role="status"
@@ -37,14 +54,7 @@ export function ConnectionBadge({ state, className }: ConnectionBadgeProps) {
     >
       <span
         aria-hidden="true"
-        className={cn(
-          "h-2 w-2 rounded-full",
-          state === "connected"
-            ? "bg-emerald-500"
-            : state === "error"
-              ? "bg-red-500"
-              : "bg-amber-500",
-        )}
+        className={cn("h-2 w-2 rounded-full", state === "error" ? "bg-red-500" : "bg-amber-500")}
       />
       {labels[state]}
     </span>

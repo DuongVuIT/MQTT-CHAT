@@ -2,16 +2,87 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens (phase-2 §4/§5/§61/§62/§63) — the web half of ONE product
+ * visual language. Values mirror apps/mobile/src/theme/tokens.ts so web and
+ * mobile read as the same product. Dark is the DEFAULT (matches mobile);
+ * a tuned light palette applies via prefers-color-scheme. Components never
+ * hardcode hex values — they consume the semantic tailwind aliases
+ * (bg-app, bg-surface, text-ink, border-line, bg-brand …) defined in
+ * tailwind.config.ts, which point at these variables.
+ */
+
 :root {
-  --bg: #f8fafc;
-  --panel: #ffffff;
-  --border: #e2e8f0;
+  /* Base ramp — layered dark surfaces (never pure black). */
+  --app: #0b1220;
+  --surface: #131c30;
+  --raised: #1c2942;
+  --high: #263554;
+  --line: #1d2a45;
+  --line-strong: #2c3b5f;
+
+  /* Text tiers */
+  --ink: #f2f6fd;
+  --ink-2: #9aa9c7;
+  --ink-3: #5e6e8f;
+
+  /* Brand — ONE indigo (mirrors mobile tokens.colors.primary). */
+  --brand: #6366f1;
+  --brand-strong: #818cf8;
+  --brand-soft: rgba(99, 102, 241, 0.16);
+  --on-brand: #ffffff;
+
+  /* Semantic states */
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.14);
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --danger-strong: #ef4444;
+  --danger-soft: rgba(248, 113, 113, 0.13);
+
+  /* Presence + overlays */
+  --presence: #34d399;
+  --presence-off: #44546b;
+  --scrim: rgba(4, 9, 20, 0.62);
+
+  /* Motion tokens (§39) — semantic timing only. */
+  --motion-fast: 130ms;
+  --motion-normal: 200ms;
+  --motion-slow: 300ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 }
 
-.dark {
-  --bg: #0b1120;
-  --panel: #111a2e;
-  --border: #1e293b;
+@media (prefers-color-scheme: light) {
+  :root {
+    --app: #f6f8fc;
+    --surface: #ffffff;
+    --raised: #eef2f9;
+    --high: #e3e9f3;
+    --line: #dfe5f0;
+    --line-strong: #c6d0e2;
+
+    --ink: #101828;
+    --ink-2: #5a6b87;
+    --ink-3: #8a97ae;
+
+    --brand: #4f46e5;
+    --brand-strong: #6366f1;
+    --brand-soft: rgba(79, 70, 229, 0.1);
+    --on-brand: #ffffff;
+
+    --ok: #059669;
+    --ok-soft: rgba(5, 150, 105, 0.1);
+    --warn: #b45309;
+    --danger: #dc2626;
+    --danger-strong: #dc2626;
+    --danger-soft: rgba(220, 38, 38, 0.08);
+
+    --presence: #059669;
+    --presence-off: #94a3b8;
+    --scrim: rgba(15, 23, 42, 0.45);
+  }
 }
 
 html,
@@ -20,16 +91,34 @@ body {
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  background-color: var(--app);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbars */
+/* Scrollbars — coherent across WebKit and Firefox (§58). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
 *::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-slate-300 dark:bg-slate-700;
+  border-radius: 9999px;
+  background-color: var(--line-strong);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ink-3);
+}
+
+/* The transcript never rubber-bands the whole page (§ scroll containment). */
+.scroll-contain {
+  overscroll-behavior: contain;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -55,26 +144,66 @@ body {
 }
 
 .animate-bubble-in {
-  animation: bubble-in 180ms ease-out both;
+  animation: bubble-in var(--motion-normal) var(--ease-enter) both;
 }
 
-@keyframes pill-nudge {
-  0%,
-  100% {
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
     transform: translate(-50%, 0);
   }
-  50% {
-    transform: translate(-50%, -3px);
+}
+
+/* New-messages pill: one gentle entrance (§36) — no infinite bounce. */
+.animate-pill-in {
+  animation: pill-in var(--motion-normal) var(--ease-enter) both;
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
-.animate-pill-nudge {
-  animation: pill-nudge 1.6s ease-in-out infinite;
+.animate-sheet-in {
+  animation: sheet-in var(--motion-fast) var(--ease-enter) both;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 1.6s var(--ease-standard) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-bubble-in,
-  .animate-pill-nudge {
+  .animate-pill-in,
+  .animate-sheet-in,
+  .animate-skeleton {
     animation: none;
   }
+}
+
+/* Keyboard focus — one visible, consistent ring (§68). */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand-strong);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
