@@ -719,3 +719,61 @@ watch` trees but teardown killed only the DIRECT child (the pnpm wrapper).
   a safety guard refusing TEST_DATABASE_URL values that look like the dev DB
   unless `ALLOW_UNSAFE_TEST_DB=1`. Verified via Datasource log line: all
   harness prisma calls now hit `mqtt_chat_test`.
+
+# Bug #30 — Duplicate "Alice" / duplicate DIRECT conversations in the list
+
+Two INDEPENDENT root causes produced the same user-visible symptom; both were
+proven against live databases and fixed at every layer.
+
+## (a) Legacy NULL-keyed DIRECT rows escaped every uniqueness guard
+
+- **Symptom**: tapping "Message someone → Alice" created a SECOND direct
+  conversation with the same peer; both appeared in the list.
+- **Root cause**: `seed.ts` `ensureDirect` minted the demo DMs WITHOUT a
+  `directPairKey`. SQL unique indexes treat NULLs as distinct, and the API's
+  reuse fast-path `findUnique({ directPairKey })` can never match a NULL row —
+  so creation fell through to `createWithOutboxEvent`, which inserted a keyed
+  twin. Proven on a fresh test DB: seeded rows carried NULL keys while
+  API-created rows had canonical keys.
+- **Fix**:
+  1. Seed stamps the canonical key at create AND heals legacy rows on re-seed
+     (guarded — never steals a key another row owns).
+  2. Migration `20260824150000_direct_pair_key_backfill` backfills NULL-keyed
+     DIRECTs from their exact-two membership (`string_agg … COLLATE "C"`
+     matches JS sort ordering); pairs that already have a keyed twin are
+     skipped rather than violating the index.
+  3. API defense-in-depth: createConversation ADOPTS a legacy twin — finds the
+     NULL-keyed conversation whose members are exactly {a, b} (oldest first),
+     stamps the key, returns it as `reused:true`; P2002 races reuse the winner.
+- **Regression**: duplicate-direct-e2e inserts a REAL NULL-keyed row (raw SQL,
+  exactly what the old seed produced) → POST for the same pair must return THE
+  SAME id, and the pair keeps exactly ONE row.
+
+## (b) Mobile rendered EVERYONE'S conversation list
+
+- **Symptom**: on mobile, contacts appeared duplicated even with clean data —
+  e.g. duong saw TWO entries labeled "Bob" (one was bob↔john).
+- **Root cause**: `api.listConversations()` sent NO userId, and the server only
+  filters by membership when userId is present — mobile consumed the GLOBAL
+  list. Any other user's DM with a peer rendered as an extra entry labeled by
+  that peer's display name.
+- **Fix**: both mobile call sites pass the active identity's userId (web was
+  already correct).
+
+## Follow-on fixes discovered during the same investigation
+
+- Mobile tore down + rebuilt its MQTT session on essentially EVERY inbound
+  message: the client effect depended on `refreshPending`, which depended on
+  `conversations`, which changes identity on every `message.created`. Fixed
+  with a ref mirror; reconnect now also heals the conversation LIST.
+- Web scroll model rewritten (open-at-latest, stick-to-bottom follow, unread
+  pill, layout-effect prepend anchor); mobile gained the same model plus
+  older-history pagination that had never been wired (hard-truncated to 50).
+- Render-perf: web slice subscriptions, single-conversation store mutations,
+  removal of duplicate conversation.* wildcard delivery; reaction handling
+  scoped per conversation on mobile.
+
+**Executed verification** (this tree): pnpm validate exit 0 · vitest 33/33 ·
+mobile jest 24/24 · full isolated test:e2e ALL PASS (9 suites incl.
+duplicate-direct with the new adoption section) · browser E2E 17/17 ×2 runs
+(before/after perf work).
