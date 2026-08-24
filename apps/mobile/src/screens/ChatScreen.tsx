@@ -180,7 +180,10 @@ export function ChatScreen({
   const handleScroll = ({
     nativeEvent: e,
   }: {
-    nativeEvent: { contentOffset: { y: number }; contentSize: { height: number } };
+    nativeEvent: {
+      contentOffset: { y: number };
+      contentSize: { height: number };
+    };
   }): void => {
     const distanceFromBottom =
       e.contentSize.height - e.contentOffset.y - listHeightRef.current;
@@ -278,7 +281,9 @@ export function ChatScreen({
           ) : undefined
         }
         ListEmptyComponent={
-          <Text style={styles.emptyChat}>No messages yet{'\n'}Say hello 👋</Text>
+          <Text style={styles.emptyChat}>
+            No messages yet{'\n'}Say hello 👋
+          </Text>
         }
         keyboardShouldPersistTaps="handled"
         renderItem={({ item, index }) => {
@@ -473,7 +478,9 @@ export function ChatScreen({
             accessibilityRole="button"
             accessibilityLabel={`Jump to ${newCount} new messages`}
           >
-            <Text style={styles.newPillText}>↓ {newCount} new message{newCount === 1 ? '' : 's'}</Text>
+            <Text style={styles.newPillText}>
+              ↓ {newCount} new message{newCount === 1 ? '' : 's'}
+            </Text>
           </Pressable>
         )}
         <View style={styles.composerRow}>

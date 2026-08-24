@@ -72,7 +72,8 @@ export function useChatSession(identity: Identity | null) {
     const store = lifecycleRef.current;
     if (!store) return;
     const next: Record<string, number> = {};
-    for (const c of conversationsRef.current) next[c.id] = store.getPending(c.id).length;
+    for (const c of conversationsRef.current)
+      next[c.id] = store.getPending(c.id).length;
     setPendingByConv(next);
   }, []);
 
@@ -346,7 +347,10 @@ export function useChatSession(identity: Identity | null) {
         setMessagesByConv(prev => {
           const list = prev[conversationId] ?? [];
           const known = new Set(list.map(m => m.id));
-          const merged = [...res.messages.filter(m => !known.has(m.id)), ...list];
+          const merged = [
+            ...res.messages.filter(m => !known.has(m.id)),
+            ...list,
+          ];
           merged.sort((a, b) => a.sequence - b.sequence);
           return { ...prev, [conversationId]: merged };
         });

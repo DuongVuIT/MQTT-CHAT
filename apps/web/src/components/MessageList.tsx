@@ -115,9 +115,7 @@ export function MessageList({
       lastConvIdRef.current !== conversationId ||
       (prevLastIdRef.current === null && prevCountRef.current === 0);
     const isPrepend =
-      !isReplace &&
-      firstId !== prevFirstIdRef.current &&
-      lastId === prevLastIdRef.current;
+      !isReplace && firstId !== prevFirstIdRef.current && lastId === prevLastIdRef.current;
     const isAppend = !isReplace && !isPrepend && lastId !== prevLastIdRef.current;
 
     if (prependAnchorRef.current && el) {

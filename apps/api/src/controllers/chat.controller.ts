@@ -302,10 +302,7 @@ export class ChatController {
         } catch (err) {
           // Two concurrent adoptions (or an adoption racing a create) can
           // both pass the checks; the unique index decides — reuse winner.
-          if (
-            err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === "P2002"
-          ) {
+          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
             const winner = await this.prisma.conversation.findUnique({
               where: { directPairKey },
               include: { members: true },
