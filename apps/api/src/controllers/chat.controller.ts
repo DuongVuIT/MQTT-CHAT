@@ -436,9 +436,29 @@ export class ChatController {
     if (!conversation || conversation.deletedAt) {
       throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
     }
+    // A DIRECT conversation is exactly its pair — it must never grow. Type
+    // validity precedes permissions: adding to a DM is invalid for ANY actor.
+    if (conversation.type !== "GROUP") {
+      throw new BadRequestException(
+        apiError("BAD_REQUEST", "Members can only be added to GROUP conversations"),
+      );
+    }
     const actor = conversation.members.find((m) => m.userId === actorUserId);
     if (!actor || actor.role !== "ADMIN") {
       throw new ForbiddenException(apiError("FORBIDDEN", "Only a group admin can add members"));
+    }
+    // Boundary validation: unknown userIds are a 404 naming them — never an
+    // FK violation leaking as a 500 from the global exception filter.
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: data.userIds } },
+      select: { id: true },
+    });
+    const known = new Set(users.map((u) => u.id));
+    const unknown = data.userIds.filter((userId) => !known.has(userId));
+    if (unknown.length > 0) {
+      throw new NotFoundException(
+        apiError("USER_NOT_FOUND", `Unknown userId(s): ${unknown.join(", ")}`),
+      );
     }
     // Membership change + canonical outbox event in ONE transaction —
     // clients reconcile from the event, never a manual reload.

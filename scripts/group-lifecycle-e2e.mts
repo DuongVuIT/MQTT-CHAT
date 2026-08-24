@@ -149,6 +149,29 @@ async function main() {
     String(directDelete.status),
   );
 
+  // ---- 3b. Member-ADD boundary validation --------------------------------
+  // Unknown userId must be a 404 naming the id — never an FK violation
+  // leaking as a 500 from the global exception filter.
+  const ghostAdd = await fetch(
+    `${API}/conversations/${conv.id}/members?actor=${encodeURIComponent(A)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userIds: [`u-${run}-ghost`] }),
+    },
+  );
+  check(ghostAdd.status === 404, "member-ADD unknown userId → 404", String(ghostAdd.status));
+  // A DIRECT conversation is exactly its pair — it can never grow.
+  const directGrow = await fetch(
+    `${API}/conversations/${direct.id}/members?actor=${encodeURIComponent(A)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userIds: [C] }),
+    },
+  );
+  check(directGrow.status === 400, "member-ADD into DIRECT pair → 400", String(directGrow.status));
+
   // ---- 4. Owner deletes → canonical tombstone everywhere ------------------
   const deleteRes = await fetch(`${API}/conversations/${conv.id}?actor=${encodeURIComponent(A)}`, {
     method: "DELETE",
