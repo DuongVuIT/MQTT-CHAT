@@ -777,3 +777,107 @@ proven against live databases and fixed at every layer.
 mobile jest 24/24 · full isolated test:e2e ALL PASS (9 suites incl.
 duplicate-direct with the new adoption section) · browser E2E 17/17 ×2 runs
 (before/after perf work).
+
+## 2026-08-24 — Session 4: FINAL release-candidate audit — first fix wave
+
+A 12-dimension parallel audit swept every subsystem (code, architecture,
+backend, web, mobile, realtime, UI/UX, motion, performance, tests, git).
+Ten finders returned ~60 leads; every adversarial verifier died to API rate
+limits, so each fix below was confirmed BY HAND against source before
+committing. #31–#34 are correctness; #35–#37 are infra/gate hardening.
+The remaining confirmed leads are tracked as OPEN ledger rows (P0-184+).
+
+# Bug #31 — A storage fault mid-media-stream crashed the whole API process
+
+- **Symptom**: any object-storage error while `GET /media` was streaming
+  surfaced as an unhandled `'error'` event on the MinIO stream → uncaught
+  exception → the API process died, taking every in-flight request with it.
+  Client aborts leaked the upstream socket.
+- **Root cause**: `object.stream.pipe(res)` with NO `'error'` listener and
+  no teardown coupling between response and stream
+  (`apps/api/src/controllers/media.controller.ts`).
+- **Fix**: `stream.on('error')` → `res.destroy()` (headers already sent; the
+  client sees a truncated body instead of a dead server) and
+  `res.on('close')` → `stream.destroy()` (abort releases the socket).
+- **Regression**: typecheck + targeted read; full gates green.
+
+# Bug #32 — Mobile identities were permanently invisible: no presence announce, no LWT
+
+- **Symptom**: mobile users never appeared online to anyone; an abrupt
+  disconnect left their stale state until Redis TTL cleanup.
+- **Root cause**: mobile built `ChatRealtimeClient` with NO `will` and never
+  published `presence.set` — web announced itself, mobile did not (parity
+  gap). Presence is written by chat-worker from commands/LWT only.
+- **Fix** (`apps/mobile/src/hooks/useChatSession.ts`): mirror web exactly —
+  LWT = canonical `presence.set {isOnline:false}` command envelope (so the
+  worker validates it like any command), `onConnect` → announce online,
+  graceful offline publish in teardown.
+- **Regression**: mobile jest 24/24 + tsc. Transport-level regression still
+  owed (jest covers reducers only) — see ledger.
+
+# Bug #33 — Web reactions flip-flopped under QoS1 redelivery
+
+- **Symptom**: tapping a reaction could visually UNDO itself seconds later;
+  duplicated `reaction.added` deliveries toggled the state off.
+- **Root cause**: BOTH `reaction.added` AND `reaction.removed` handlers
+  called `toggleReaction` — a toggle is not idempotent, so QoS1
+  redelivery (guaranteed by MQTT at-least-once) flipped state.
+- **Fix**: authoritative application — new store mutator
+  `applyReaction(messageId, emoji, userId, present)` (idempotent, same-ref
+  no-op); the event handler passes the TARGET state named by the event.
+  Web now matches mobile's `applyReactionEvent` semantics.
+- **Regression**: 2 new chat-store cases incl. redelivery replaying
+  `reaction.added` twice → exactly one reaction.
+
+# Bug #34 — member-ADD had no boundary validation: unknown user → 500, DIRECT pair growable
+
+- **Symptom**: `POST /conversations/:id/members` with an unknown userId hit
+  the Prisma FK violation → raw 500 (invariant #12 breach); nothing stopped
+  adding a third user to a DIRECT pair, corrupting the pair-key contract.
+- **Root cause**: addMembers trusted `userIds` as existing users and never
+  checked conversation type.
+- **Fix** (`apps/api/src/controllers/chat.controller.ts`): type-validity
+  FIRST (adding to a DIRECT conversation is 400 for ANY actor — validity
+  precedes permissions), then unknown userIds → 404 naming them.
+- **Regression**: §3b added to `scripts/group-lifecycle-e2e.mts`
+  ("unknown userId → 404", "member-ADD into DIRECT pair → 400"); full
+  isolated test:e2e exit 0.
+
+# Bug #35 — Gateway ignored SIGTERM: restarts were abrupt kills
+
+- **Symptom**: `docker compose restart` / deploy signals killed the gateway
+  mid-request; open WebSocket upgrades never end on their own (invariant
+  #15 breach). Env was also read raw from `process.env`.
+- **Fix**: SIGTERM/SIGINT handler — stop accepting, close idle connections,
+  bounded 5s drain, force-close all, exit 0; validated env via new
+  `loadGatewayEnv()` zod schema (`packages/config`, new `GatewayEnv`);
+  gateway now depends on `@mqtt-chat/config`.
+- **Regression**: live probe — fresh instance :3998 → SIGTERM →
+  "closed cleanly", exit 0; tsc green.
+
+# Bug #36 — Quality gates had holes: .mts/.cts escaped prettier, eslint globbed a deleted app
+
+- **Symptom**: the format gate silently skipped all `scripts/*.mts|*.cts`
+  (three tracked E2E suites escaped it); `eslint.config.mjs` still globbed
+  the deleted `apps/admin`.
+- **Fix**: globs extended (verified the three suites already conform);
+  stale admin glob removed.
+- **Regression**: `prettier --check scripts/*.mts` pass; lint green.
+
+# Bug #37 — Browser admin-feed probe could spuriously PASS on pre-existing traffic
+
+- **Symptom**: the admin live-feed check asserted generic `"message.created"`
+  text in the feed — ANY event on the broker (another tab, a worker) satisfied
+  it even if OUR publish never landed (the spurious-pass class behind #25).
+- **Fix** (`scripts/web-browser-e2e.mjs`): count occurrences before the
+  publish (settle window), require an INCREASE afterwards — attribution by
+  count delta, the strongest available proof since the feed renders event
+  TYPES only.
+- **Regression**: browser suite exit 0 ×2 (second run validates the hardened
+  probe against a warm feed).
+
+**Executed verification** (this tree): format+lint+typecheck+vitest exit 0 ·
+mobile jest 24/24 · test:e2e exit 0 (incl. 2 NEW boundary checks) ·
+browser E2E exit 0 ×2 · gateway SIGTERM drain verified live. NOT yet run this
+session: standalone build / verify:all / verify:completion (tracked as the
+audit's closing step).
