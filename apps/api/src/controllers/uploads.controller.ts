@@ -10,6 +10,11 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Express } from "express";
 import { z } from "zod";
+import {
+  CANONICAL_MEDIA_TYPES,
+  normalizeMediaType,
+  resolveMediaType,
+} from "@mqtt-chat/mqtt-contracts";
 import { S3CompatibleStorage, buildMediaKey } from "@mqtt-chat/storage";
 import { loadServerEnv } from "@mqtt-chat/config";
 import { PrismaService } from "../prisma.service";
@@ -27,17 +32,7 @@ import { ZodValidationPipe, apiError } from "../common";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50MB cap
 
-const ALLOWED_CONTENT_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "video/mp4",
-  "video/webm",
-  "audio/webm",
-  "audio/mpeg",
-  "application/pdf",
-] as const;
+// Allowed types come from the shared canonical policy (@mqtt-chat/mqtt-contracts).
 
 const uploadSchema = z.object({
   conversationId: z.string().min(1),
@@ -74,10 +69,24 @@ export class UploadsController {
     if (!file) {
       throw new BadRequestException(apiError("BAD_REQUEST", "Missing file field"));
     }
-    const mimeType = file.mimetype || "application/octet-stream";
-    if (!(ALLOWED_CONTENT_TYPES as readonly string[]).includes(mimeType)) {
+    // Canonical MIME policy (repair-log #26): normalize platform spellings
+    // (`image/jpg` → `image/jpeg`, parameter suffixes, casing) BEFORE the
+    // allowlist check; fall back to the filename extension when the client
+    // sent no usable MIME. The stored/returned mimeType is always canonical.
+    const resolved =
+      resolveMediaType(file.mimetype ?? null, file.originalname ?? null) ??
+      normalizeMediaType(file.mimetype);
+    if (!resolved) {
       throw new BadRequestException(
-        apiError("UNSUPPORTED_MEDIA_TYPE", `Unsupported type ${mimeType}`),
+        apiError("UNSUPPORTED_MEDIA_TYPE", "Missing content type and unknown filename extension"),
+      );
+    }
+    if (!(CANONICAL_MEDIA_TYPES as readonly string[]).includes(resolved)) {
+      throw new BadRequestException(
+        apiError(
+          "UNSUPPORTED_MEDIA_TYPE",
+          `Unsupported type ${normalizeMediaType(file.mimetype) ?? resolved}. Supported: ${CANONICAL_MEDIA_TYPES.join(", ")}`,
+        ),
       );
     }
     if (!file.size || file.size <= 0) {
@@ -95,11 +104,11 @@ export class UploadsController {
     }
 
     const key = buildMediaKey(data.conversationId, file.originalname || "upload");
-    await this.storage.upload(key, file.buffer, mimeType);
+    await this.storage.upload(key, file.buffer, resolved);
     return {
       key,
       filename: file.originalname ?? "upload",
-      mimeType,
+      mimeType: resolved,
       size: file.size,
     };
   }
