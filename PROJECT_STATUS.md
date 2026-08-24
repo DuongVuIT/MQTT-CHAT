@@ -106,6 +106,14 @@ Statuses: NOT_STARTED / IN_PROGRESS / BLOCKED_EXTERNAL / FAILED / VERIFIED
 | P1-193 | P1  | MOBILE_JEST_NOT_GATED               | VERIFIED | root test:mobile wired into validate — both unit suites in every gate run — repair-log #44                                                                                                                                                                          |            |
 | P1-194 | P1  | HARNESS_SIGNAL_SAFETY               | VERIFIED | SIGINT/SIGTERM run real teardown (--keep persists; verified exit 130, :3011 freed); 120s suite watchdog; failure-path exact-ID cleanup in all fixture suites — repair-log #44                                                                                       |            |
 
+| P1-195 | P1 | DIRECT_TWIN_REPAIR | VERIFIED | keyed twin <2 members repaired in place; NULL-key ownership = membership⊆{a,b} + in-tx completion; live backfill applied + orphan removed — repair-log #45; race probe + adoption e2e PASS | |
+| P1-196 | P1 | MOBILE_OPEN_AT_LATEST_FLASH | VERIFIED | inverted transcript: offset 0 = latest (no top-frame flash); onEndReached pagination replaces y<120 guard; pure buildChatRows row model (grouping/separators/chips/receipts) unit-tested — repair-log #46; jest 35/35 | |
+| P1-197 | P1 | WEB_PREPEND_DOUBLE_COMPENSATION | VERIFIED | overflow-anchor:none (native anchoring double-applied the delta → bottom slam); container-max scrolls replace sentinel scrollIntoView (16px padding-edge gap); RO distance computed live — repair-log #47; 300-msg probe: anchor preserved EXACTLY | |
+| P1-198 | P1 | WEB_GAP_RECOVERY_DEAD_CODE | VERIFIED | watermark captured BEFORE store advance (was read after applyMessageActivity — guard unreachable); transcript tail included in the max — repair-log #48 | |
+| P1-199 | P1 | EPHEMERAL_TTLS_AND_GRACE | VERIFIED | typing receipts + 8s TTL sweep + self-echo filter (both platforms); presence offline flips held 10s (reconnect blips never flicker) — repair-log #49 | |
+| P1-200 | P1 | DESIGN_SYSTEM_AND_DEBUG_SURFACES | VERIFIED | one semantic token layer (web dark-default+light, mobile tokens v2, shared identity); raw ids/enums off every screen; skeletons/error/retry states; 44pt targets; focus rings; reduced-motion — repair-log #50; browser probe 1600/1280/820 PASS | |
+| P1-201 | P1 | E2E_ID_SELECTOR_CONTRACT | VERIFIED | identity cards expose data-user-id; harness selects by attribute (text fallback); group-name input by aria-label — repair-log #51; test:browser ALL PASS | |
+
 ## Fixed bugs ledger (docs/repair-log.md)
 
 #1–#16 (historical): render loop · subscriptions · bot double-reply · existence check ·
@@ -153,18 +161,30 @@ validation · mobile typing throttle + web error surface + mobile jest gating
 
 ## NEXT EXECUTABLE STEPS
 
-FINAL RC AUDIT COMPLETE (sessions 4–5). Every CONFIRMED finding is fixed and
-VERIFIED: P0-184/185 closed with a live SIGTERM zero-loss proof; P1-186..194
-closed with lifecycle/browser regressions; P0-044 back to VERIFIED. Remaining
-leads are Tier-2 (finder-claimed, never confirmed by a verifier) — re-verify
+SESSION 6 (2026-08-25, phase-2 product pass) closed P1-195..201: canonical
+DIRECT-twin repair/adopt, mobile inverted-list scroll system, web exact
+scroll math (overflow-anchor + container-max), live sequence-gap recovery,
+typing TTLs + presence grace on both platforms, the shared design-system
+pass, and the E2E id-selector contract. Gates at close: validate ✓,
+test:e2e 95/95 ✓, test:browser ✓, smoke/smoke:dev ✓, verify:completion ✓,
+300-message scroll/perf probe 11/11 ✓, broker leak probe ✓ (subscription
+counts stable across churn/switch/reconnect).
+
+Remaining leads are Tier-2 (finder-claimed, never confirmed) — re-verify
 each against source BEFORE treating it as real:
 
 - backend/worker: two-phase reaction/receipt/presence writes; outbox claim
   outside tx; tombstone history read via GET messages (#148 follow-up);
 - contracts/clients: REST bootstrap bypasses normalizers; conversation.updated
   produced nowhere; membership guard on message.created for web;
-- infra/web/mobile UI: broker authz allow-all demo tradeoff; hover-only
-  actions; narrow viewport; entrance-animation replay; reaction-chip add.
+- infra: broker authz allow-all demo tradeoff.
+
+PENDING VISUAL (blocked on macOS screen-unlock, external constraint):
+in-simulator interactive pass of the redesigned mobile screens (picker
+open, attachment sheet → photo/document pickers, action sheet, composer)
+on iPhone 16 Pro + the narrower iPhone 16e (both booted), per phase-2
+§58/§59/§74. Code-level verification (jest/tsc/boot with zero RedBox) is
+done; the tap-through matrix needs an unlocked display (P1-113 constraint).
 
 Then the closing clean-state re-run (`pnpm verify:all` + `pnpm
 verify:completion`) before declaring READY / NOT READY.

@@ -962,3 +962,85 @@ submit — parity with web Composer.
 **Executed verification** (this tree): validate incl. build + both unit
 suites · full test:e2e exit 0 (90 checks PASS incl. 9 new boundary/
 regression checks) · live SIGTERM zero-loss probe PASS.
+
+# Bug #45 — degraded DIRECT twins could surface as dead rows (P1-195)
+
+The directPairKey UNIQUE index closed the duplicate-Alice race, but two
+degenerate rows slipped around it: (a) a KEYED row with <2 members was
+handed to clients by the reuse fast-path as `reused:true` with empty
+members — a dead DM row (a live memberless orphan existed in the dev DB);
+(b) a NULL-key row with 0/1 members failed the legacy-adoption guard
+(`members.length === 2`) and a SECOND conversation for the pair was minted
+beside the shell. Fix: the fast-path REPAIRS keyed twins in place
+(restore missing membership); legacy adoption now owns any NULL-key row
+whose membership ⊆ {a,b} and completes it in the same transaction. Live
+dev DB: backfill migration applied, orphan removed. Verified by the 8-way
+concurrent race probe + legacy-adoption e2e.
+
+# Bug #46 — mobile chat opened at the TOP of history, then jumped (P1-196)
+
+The ascending FlatList laid out from index 0 and reached the bottom only
+via a rAF `scrollToEnd` — at least one painted frame showed the OLDEST
+messages on every open, and the y<120 pagination guard fired spuriously
+during the jump (an unintended older-page fetch per open). Replaced with
+the industry-standard INVERTED transcript: offset 0 IS the latest message
+(open-at-latest is immediate, §34), older pages prepend beyond the
+viewport without compensation (§37), pinned appends follow for free (§35),
+and pagination is a real `onEndReached` at the data end (= visual top).
+Row model extracted to pure `buildChatRows` (unit-tested): sender-run
+grouping with 5-min gap breaks + corner shaping, date separators,
+aggregated reaction chips, resolved reply previews, read receipts from
+peer watermarks.
+
+# Bug #47 — web prepend compensation was double-applied (P1-197)
+
+The 300-message scripted acceptance found Chrome's NATIVE scroll anchoring
+adjusting scrollTop when the older page grew the content, and the manual
+height-delta compensation then added the same delta again — the doubled
+offset clamped to max-scroll and slammed the reader to the bottom of the
+thread. Fix: `overflow-anchor: none` on the scroller (the layout-effect
+compensation is the single authority). Second finding: follow/jump used
+`scrollIntoView` on the bottom sentinel, which aligns at the PADDING edge —
+a permanent ~16px gap under the latest message; both paths now scroll the
+container to its true maximum. Also: the stick-to-bottom ResizeObserver
+computes bottom distance LIVE at callback time (a stale pinned flag from a
+just-programmatic scroll could re-pin mid-prepend). Probe now asserts:
+open-at-latest = 0px, prepend anchor preserved EXACTLY, pill jump = 0px.
+
+# Bug #48 — web sequence-gap recovery was unreachable dead code (P1-198)
+
+`recoverSequenceGap` guarded on `sequence > lastKnown + 1` but read
+`lastKnown` from the conversation AFTER `applyMessageActivity` had already
+advanced it to the incoming event's sequence — the guard could never be
+true, so missed events silently left gaps. The watermark is now captured
+(max of list summary and transcript tail) BEFORE the store mutation.
+
+# Bug #49 — ephemeral state had no TTLs or grace (P1-199)
+
+Typing: `typing.stopped` rides QoS0 and the server's Redis expiry is never
+re-broadcast — one lost frame wedged "X is typing…" forever. Both clients
+now stamp receipts per `typing.started` and sweep entries older than 8s,
+and filter their own echo from the shared topic. Presence: LWT publishes
+offline instantly on any drop and clients reconnect ~2s later — every
+network blip flickered peers offline→online. Offline flips are now held
+10s client-side; an online event inside the window cancels the flip.
+
+# Bug #50 — two unrelated UIs, decorative tokens, debug surfaces (P1-200)
+
+The design system existed on paper only: mobile tokens had ~zero adopters
+and two divergent "primary" purples; web hardcoded raw slate/indigo with
+dark-mode classes that NO code ever toggled. Rebuilt as ONE semantic token
+layer (dark default + tuned light via prefers-color-scheme on web) consumed
+through tailwind aliases / StyleSheet tokens; deterministic avatar identity
+palette shared conceptually across platforms. Product surfaces de-bugged:
+raw user/conversation ids removed from every screen, wire enums mapped to
+friendly labels, diagnostics gated to dev, error/loading/skeleton states
+added, 44pt touch targets, focus-visible rings, reduced-motion respected.
+
+# Bug #51 — browser E2E selected identities by raw visible ids (P1-201)
+
+The harness waited for buttons containing "duong"/"bob" — text the product
+must NOT render (§9/§24). Identity cards now expose a stable
+`data-user-id` attribute; the harness prefers it (text fallback), types
+the group name by aria-label, and asserts the post-switch sidebar shows
+the display name.
