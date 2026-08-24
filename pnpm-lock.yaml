@@ -170,6 +170,9 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@mqtt-chat/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       http-proxy:
         specifier: ^1.18.1
         version: 1.18.1

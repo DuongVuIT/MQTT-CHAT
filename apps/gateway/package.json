@@ -10,6 +10,7 @@
     "clean": "rm -rf .turbo"
   },
   "dependencies": {
+    "@mqtt-chat/config": "workspace:*",
     "http-proxy": "^1.18.1"
   },
   "devDependencies": {

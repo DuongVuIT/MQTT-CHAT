@@ -68,8 +68,17 @@ const webEnvSchema = z.object({
   NEXT_PUBLIC_MQTT_WS_URL: z.string().optional(),
 });
 
+const gatewayEnvSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  GATEWAY_PORT: z.coerce.number().int().positive().default(3000),
+  WEB_ORIGIN: z.string().url().default("http://127.0.0.1:3100"),
+  API_ORIGIN: z.string().url().default("http://127.0.0.1:3001"),
+  EMQX_WS_ORIGIN: z.string().url().default("http://127.0.0.1:8083"),
+});
+
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 export type WebEnv = z.infer<typeof webEnvSchema>;
+export type GatewayEnv = z.infer<typeof gatewayEnvSchema>;
 
 export class ConfigValidationError extends Error {
   constructor(public readonly issues: z.ZodIssue[]) {
@@ -93,6 +102,13 @@ export function loadServerEnv(source: NodeJS.ProcessEnv = process.env): ServerEn
 /** Validate and return browser-exposed environment (web/admin). */
 export function loadWebEnv(source: Record<string, string | undefined>): WebEnv {
   const result = webEnvSchema.safeParse(source);
+  if (!result.success) formatIssues(result.error);
+  return result.data;
+}
+
+/** Validate and return gateway environment (public-origin reverse proxy). */
+export function loadGatewayEnv(source: NodeJS.ProcessEnv = process.env): GatewayEnv {
+  const result = gatewayEnvSchema.safeParse(source);
   if (!result.success) formatIssues(result.error);
   return result.data;
 }

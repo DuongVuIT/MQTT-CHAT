@@ -14,12 +14,16 @@
  */
 import http from "node:http";
 import httpProxy from "http-proxy";
+import { loadGatewayEnv } from "@mqtt-chat/config";
 
-const PORT = Number(process.env.GATEWAY_PORT ?? 3000);
+// Env is validated at startup like every other app (AGENTS invariant #12) —
+// garbage like GATEWAY_PORT=abc fails fast instead of listening on NaN.
+const env = loadGatewayEnv();
 
-const WEB_ORIGIN = process.env.WEB_ORIGIN ?? "http://127.0.0.1:3100";
-const API_ORIGIN = process.env.API_ORIGIN ?? "http://127.0.0.1:3001";
-const EMQX_WS_ORIGIN = process.env.EMQX_WS_ORIGIN ?? "http://127.0.0.1:8083";
+const PORT = env.GATEWAY_PORT;
+const WEB_ORIGIN = env.WEB_ORIGIN;
+const API_ORIGIN = env.API_ORIGIN;
+const EMQX_WS_ORIGIN = env.EMQX_WS_ORIGIN;
 
 const PROXY_TIMEOUT_MS = 30_000;
 
@@ -93,3 +97,22 @@ server.listen(PORT, () => {
       `  /mqtt(ws) → ${EMQX_WS_ORIGIN}`,
   );
 });
+
+// Graceful shutdown (AGENTS invariant #15): stop accepting new work, give
+// in-flight HTTP requests a short drain window, then force-close everything —
+// long-lived WS upgrades would otherwise keep the process alive forever.
+function shutdown(signal: string): void {
+  console.log(`[gateway] ${signal} received — draining…`);
+  server.closeIdleConnections?.();
+  const forceTimer = setTimeout(() => {
+    server.closeAllConnections?.();
+  }, 5_000);
+  forceTimer.unref();
+  server.close(() => {
+    console.log("[gateway] closed cleanly");
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
