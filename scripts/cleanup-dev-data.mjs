@@ -40,6 +40,9 @@ const SCRIPT_MESSAGE_MARKERS = [
   "/users",
 ];
 
+/** Conversation-title prefixes minted by this repo's E2E tooling. */
+const TEST_TITLE_PREFIXES = ["e2e-group-", "member-e2e", "web-e2e-", "discovery-", "repro-group-"];
+
 const report = {};
 
 async function main() {
@@ -47,10 +50,11 @@ async function main() {
   const testConversations = await prisma.conversation.findMany({
     where: {
       OR: [
-        { title: { startsWith: "e2e-group-" } },
-        { title: { startsWith: "member-e2e" } },
+        ...TEST_TITLE_PREFIXES.map((prefix) => ({ title: { startsWith: prefix } })),
         { type: "DIRECT", createdBy: { startsWith: "fx" } },
         { type: "DIRECT", createdBy: { startsWith: "e2e-u" } },
+        { createdBy: { startsWith: "u-repro-" } },
+        { createdBy: { startsWith: "u-wm-" } },
       ],
     },
     select: { id: true, title: true },
@@ -63,6 +67,10 @@ async function main() {
         { id: { startsWith: "fx" } },
         { id: { startsWith: "e2e-ua-" } },
         { id: { startsWith: "e2e-ub-" } },
+        // discovery/repro E2E identities (`u-wm-<run>-web|mob`, `u-repro-*`):
+        // same minters the conversation query matches by createdBy.
+        { id: { startsWith: "u-wm-" } },
+        { id: { startsWith: "u-repro-" } },
       ],
     },
     select: { id: true },
@@ -75,9 +83,24 @@ async function main() {
       OR: [
         ...SCRIPT_MESSAGE_MARKERS.map((content) => ({ content })),
         { content: { startsWith: "gateway round-trip" } },
+        { content: { startsWith: "admin live feed probe" } },
+        { content: { startsWith: "admin probe" } },
+        { content: { startsWith: "CONTRACT-EVENT-PROBE" } },
+        { content: { startsWith: "LIVEPROBE" } },
+        { content: { startsWith: "immediate-send-" } },
         { clientMessageId: { startsWith: "gwtest-" } },
         { clientMessageId: { startsWith: "smoke-" } },
         { clientMessageId: { startsWith: "bot-e2e-" } },
+        { clientMessageId: { startsWith: "adm-" } },
+        { clientMessageId: { startsWith: "admprb-" } },
+        { clientMessageId: { startsWith: "contract-" } },
+        // Ad-hoc (uncommitted) debug-script residue observed in the dev DB:
+        // reply-feature reproduction rows ("REPLY-BASE" content).
+        { content: { startsWith: "REPLY-BASE" } },
+        { clientMessageId: { startsWith: "reply-base-" } },
+        // notification-e2e.mjs mints `notify-e2e-<uuid8>` into a SHARED demo
+        // conversation on every run and never deletes it.
+        { content: { startsWith: "notify-e2e-" } },
       ],
     },
     select: { id: true, content: true, conversationId: true },
@@ -86,15 +109,42 @@ async function main() {
   report.testConversations = testConversations.length;
   report.testUsers = testUsers.length;
   report.scriptMessages = scriptMessages.length;
+
+  // 5. Tombstoned TOOLING-owned groups (#28): soft-deleted via the product
+  // endpoint are invisible to users but still physically present. User-deleted
+  // demo groups are NEVER touched — only tooling-minted titles/creators.
+  const tombstonedTestGroups = await prisma.conversation.findMany({
+    where: {
+      deletedAt: { not: null },
+      OR: [
+        ...TEST_TITLE_PREFIXES.map((prefix) => ({ title: { startsWith: prefix } })),
+        { createdBy: { startsWith: "u-repro-" } },
+        { createdBy: { startsWith: "u-wm-" } },
+      ],
+    },
+    select: { id: true, title: true },
+  });
+  report.tombstonedTestGroups = tombstonedTestGroups.length;
+
   console.log("DRY-RUN plan:", report);
   if (!APPLY) {
     console.log("(re-run with --apply to delete exactly these rows)");
     return;
   }
 
-  for (const c of testConversations) {
-    await prisma.conversation.delete({ where: { id: c.id } });
-  }
+  // One batched delete over the DEDUPED id set (a row can match both lists).
+  const testConversationIds = [
+    ...new Set([...testConversations, ...tombstonedTestGroups].map((c) => c.id)),
+  ];
+  await prisma.conversation.deleteMany({
+    where: { id: { in: testConversationIds } },
+  });
+  // Script messages BEFORE users: Message.sender is restrict-on-delete, so a
+  // matched residue row authored by a matched test user would otherwise make
+  // that user's delete fail (silently skipped below).
+  await prisma.message.deleteMany({
+    where: { id: { in: scriptMessages.map((m) => m.id) } },
+  });
   for (const u of testUsers) {
     try {
       await prisma.user.delete({ where: { id: u.id } });
@@ -102,9 +152,6 @@ async function main() {
       console.warn(`user ${u.id} still referenced (${err.code ?? err.message}); skipped`);
     }
   }
-  await prisma.message.deleteMany({
-    where: { id: { in: scriptMessages.map((m) => m.id) } },
-  });
 
   // 4. Repair the DIRECT-conversation invariant (exactly 2 distinct members):
   //    legacy runs left the bot joined to demo DIRECT pairs, which breaks
