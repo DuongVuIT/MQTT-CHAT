@@ -87,9 +87,17 @@ export class ChatController {
 
   // ---------- Users ----------
 
+  /**
+   * Human users only (#8): bots are domain-DISTINCT from users (senderType,
+   * rule engine) and must never appear in human-member pickers as ordinary
+   * participants. The canonical system bot is excluded here; if a future bot
+   * ever needs to be pickable it must be an explicit, deliberate product
+   * decision — not an accident of a flat user list.
+   */
   @Get("users")
-  async listUsers() {
+  async listUsers(@Query("includeBots") includeBots?: string) {
     const users = await this.prisma.user.findMany({
+      where: includeBots === "1" ? undefined : { NOT: { id: { startsWith: "system-bot" } } },
       orderBy: { createdAt: "asc" },
       select: { id: true, displayName: true, avatarUrl: true, createdAt: true },
     });
