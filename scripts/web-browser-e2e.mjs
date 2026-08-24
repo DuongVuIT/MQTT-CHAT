@@ -214,6 +214,24 @@ try {
   const cmid = `adm-${Date.now()}`;
   const probeConversationId = createdEvent?.data?.id;
   if (!probeConversationId) throw new Error("cannot run live-feed probe without suite group");
+  // The live feed renders event TYPES only (no payloads), so a pre-existing
+  // or interleaved "message.created" row used to satisfy this check without
+  // our probe having landed. Attribute instead: count occurrences BEFORE the
+  // publish and require the count to INCREASE afterwards.
+  const beforeProbe = await ADM.page.evaluate(() => {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (Date.now() - start >= 6000) resolve(0);
+        else if (document.body.innerText.includes("message.created")) {
+          // Wait out the settle window so an event already in flight cannot
+          // be mistaken for ours; whatever remains after 1.5s is baseline.
+          setTimeout(() => resolve(document.body.innerText.split("message.created").length - 1), 1500);
+        } else setTimeout(tick, 400);
+      };
+      tick();
+    });
+  });
   observer.publish(
     `${NS}/commands/message/send`,
     JSON.stringify({
@@ -234,15 +252,16 @@ try {
     }),
     { qos: 1 },
   );
-  const sawLive = await ADM.page.evaluate(async () => {
+  const sawLive = await ADM.page.evaluate(async (baseline) => {
     const start = Date.now();
     while (Date.now() - start < 12000) {
-      if (document.body.innerText.includes("message.created")) return true;
+      const n = document.body.innerText.split("message.created").length - 1;
+      if (n > baseline) return true;
       await new Promise((r) => setTimeout(r, 400));
     }
     return false;
-  });
-  check(sawLive, "admin live event stream receives message.created (shared adapter works)");
+  }, beforeProbe);
+  check(sawLive, "admin live event stream receives OUR probe (count increased over baseline)");
 
   // ---- Gates -------------------------------------------------------------
   for (const s of [A.state, B.state, ADM.state]) {
