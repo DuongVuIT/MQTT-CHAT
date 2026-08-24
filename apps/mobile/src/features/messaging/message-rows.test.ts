@@ -40,9 +40,7 @@ function daysAgoIso(days: number): string {
 function messageRows(
   rows: ChatRow[],
 ): Map<string, Extract<ChatRow, { kind: 'message' }>> {
-  return new Map(
-    rows.filter(r => r.kind === 'message').map(r => [r.key, r]),
-  );
+  return new Map(rows.filter(r => r.kind === 'message').map(r => [r.key, r]));
 }
 
 describe('buildChatRows', () => {
@@ -57,9 +55,7 @@ describe('buildChatRows', () => {
     );
     // A day-break separator may precede the oldest message; message order
     // itself must be strictly newest-first.
-    const ids = rows
-      .filter(r => r.kind === 'message')
-      .map(r => r.message.id);
+    const ids = rows.filter(r => r.kind === 'message').map(r => r.message.id);
     expect(ids).toEqual(['m2', 'm1']);
   });
 

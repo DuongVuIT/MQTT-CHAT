@@ -81,13 +81,22 @@ async function newSession(tag) {
 }
 
 async function clickUserCard(page, userIdOrName) {
+  // The product UI no longer renders raw user ids (phase-2 §9/§24) — select
+  // by the stable data-user-id attribute, falling back to visible text.
   await page.waitForFunction(
-    (name) => [...document.querySelectorAll("button")].some((b) => b.textContent?.includes(name)),
+    (id) =>
+      Boolean(document.querySelector(`button[data-user-id="${id}"]`)) ||
+      [...document.querySelectorAll("button")].some((b) => b.textContent?.includes(id)),
     { timeout: 15000 },
     userIdOrName,
   );
-  await page.evaluate((name) => {
-    [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(name)).click();
+  await page.evaluate((id) => {
+    const byAttr = document.querySelector(`button[data-user-id="${id}"]`);
+    if (byAttr) {
+      byAttr.click();
+      return;
+    }
+    [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(id)).click();
   }, userIdOrName);
 }
 
@@ -114,7 +123,7 @@ try {
   // ---- Group creation A→B (deterministic fresh pair) ---------------------
   const groupName = `web-e2e-${Date.now().toString(36)}`;
   await A.page.click('button[aria-label="New conversation"]');
-  await A.page.type('input[placeholder="Group title (optional)"]', groupName);
+  await A.page.type('input[aria-label="Group name"]', groupName);
   await A.page.type('input[aria-label="Search users"]', "alice");
   await A.page.click('ul[aria-label="Selectable users"] label');
   await A.page.evaluate(() => {
@@ -196,8 +205,10 @@ try {
   await clickUserCard(A.page, "bob");
   await A.page.waitForFunction(() => location.pathname === "/chat", { timeout: 15000 });
   await sleep(2000);
-  const identityOk = await A.page.evaluate(() => document.body.innerText.includes("bob"));
-  check(identityOk, "identity switch lands as new user (sidebar shows bob)");
+  // The sidebar shows the DISPLAY NAME (raw ids are product-forbidden) —
+  // assert on "Bob", not the userId.
+  const identityOk = await A.page.evaluate(() => document.body.innerText.includes("Bob"));
+  check(identityOk, "identity switch lands as new user (sidebar shows Bob)");
 
   // ---- Admin dashboard ---------------------------------------------------
   const ADM = await newSession("admin");

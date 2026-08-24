@@ -68,6 +68,7 @@ export default function UserPickerPage() {
               <li key={user.id}>
                 <button
                   type="button"
+                  data-user-id={user.id}
                   onClick={() => {
                     choose(user.id);
                   }}

@@ -208,9 +208,7 @@ export const MessageBubble = memo(function MessageBubble({
                 }`}
               >
                 <p className="font-semibold">{row.replySource?.senderName ?? "Reply"}</p>
-                <p className="truncate opacity-80">
-                  {quoteText(row.replySource)}
-                </p>
+                <p className="truncate opacity-80">{quoteText(row.replySource)}</p>
               </div>
             )}
             {editing ? (
