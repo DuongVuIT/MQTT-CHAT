@@ -125,7 +125,8 @@ try {
   });
 
   // Canonical conversation.created observed server-side…
-  let createdEvent = null;
+  // NOTE: assigns the OUTER createdEvent (declared above) — the finally
+  // cleanup depends on it; a local `let` here would shadow it to null.
   for (let i = 0; i < 30 && !createdEvent; i++) {
     await sleep(400);
     createdEvent = events.find(
@@ -207,10 +208,12 @@ try {
   check(!adminText.includes("mqtt.connect is not a function"), "no mqtt.connect runtime error");
   const adminHealthy = adminText.includes("API ok") || adminText.includes("API degraded"); // REAL health, never hardcoded
   check(Boolean(adminHealthy), "admin shows live API/DB health badge");
-  // Live stream: trigger an MQTT message and expect it in the admin feed
+  // Live stream: trigger an MQTT message and expect it in the admin feed.
+  // The probe targets THIS SUITE'S ephemeral group (deleted in `finally`) —
+  // never write test content into shared demo conversations like General.
   const cmid = `adm-${Date.now()}`;
-  const convs = await fetch(`${BASE}/api/conversations`).then((r) => r.json());
-  const general = (convs.conversations ?? []).find((c) => c.title === "General");
+  const probeConversationId = createdEvent?.data?.id;
+  if (!probeConversationId) throw new Error("cannot run live-feed probe without suite group");
   observer.publish(
     `${NS}/commands/message/send`,
     JSON.stringify({
@@ -218,9 +221,10 @@ try {
       commandType: "message.send",
       version: 1,
       timestamp: new Date().toISOString(),
-      actor: { userId: "john", deviceId: "admin-e2e" },
+      // Actor must be a member of the target conversation (duong created it).
+      actor: { userId: "duong", deviceId: "admin-e2e" },
       data: {
-        conversationId: general.id,
+        conversationId: probeConversationId,
         clientMessageId: cmid,
         type: "TEXT",
         content: "admin live feed probe",
@@ -262,11 +266,12 @@ try {
   failed = true;
   console.log("FATAL:", err.message);
 } finally {
-  // Fixture hygiene: remove the group this run created (exact id from event).
+  // Fixture hygiene: tombstone the group this run created (exact id from
+  // event). duong created it → actor=duong satisfies the admin-only rule.
   if (createdEvent?.data?.id) {
-    await fetch(`${BASE}/api/conversations/${createdEvent.data.id}`, { method: "DELETE" }).catch(
-      () => {},
-    );
+    await fetch(`${BASE}/api/conversations/${createdEvent.data.id}?actor=duong`, {
+      method: "DELETE",
+    }).catch(() => {});
     console.log("cleaned up", createdEvent.data.id);
   }
   observer.end(true);
