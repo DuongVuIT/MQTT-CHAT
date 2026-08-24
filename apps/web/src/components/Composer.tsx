@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { republishPayload, useChatStore } from "@/store/chat-store";
@@ -80,10 +80,9 @@ export function retryPendingMessage(clientMessageId: string): void {
 }
 
 /**
- * Message composer: optimistic send with clientMessageId, typing indicator
- * publishing (debounced stop), file upload via presigned URL (metadata over MQTT).
+ * Composer v2 (§32): auto-growing multiline input, attachment + paste-image,
+ * reply preview banner, upload state, and one consistent focus ring.
  */
-
 export function Composer({
   conversationId,
   replyTo,
@@ -97,9 +96,19 @@ export function Composer({
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
   const identity = useChatStore((s) => s.identity);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingRef = useRef(0);
+
+  // Auto-grow: the textarea tracks its content up to the cap (§32) — no
+  // one-row box with internal scrolling.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [text]);
 
   if (!identity) return null;
 
@@ -137,7 +146,7 @@ export function Composer({
   };
 
   const uploadFile = async (file: File): Promise<void> => {
-    if (!file) return;
+    if (!file || uploading) return;
     setUploading(true);
     try {
       // Same-origin multipart upload — the API streams to object storage
@@ -165,22 +174,20 @@ export function Composer({
       useChatStore.getState().setError(error instanceof Error ? error.message : "Upload failed");
     } finally {
       setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   return (
-    <footer className="border-t border-slate-200 p-3 dark:border-slate-800">
+    <footer className="border-t border-line px-3 py-2.5">
       {replyTo && !replyTo.deletedAt && (
         <div
-          className="mb-2 flex items-center justify-between gap-2 rounded-lg border-l-2 border-indigo-400 bg-slate-100 px-3 py-1.5 text-xs dark:bg-slate-800"
+          className="animate-sheet-in mb-2 flex items-center justify-between gap-2 rounded-lg border-l-2 border-brand-strong bg-raised px-3 py-1.5 text-xs"
           data-testid="reply-banner"
         >
           <div className="min-w-0">
-            <p className="font-medium text-slate-600 dark:text-slate-300">
-              Replying to {replyTo.senderName}
-            </p>
-            <p className="truncate text-slate-500 dark:text-slate-400">
+            <p className="font-semibold text-brand-strong">Replying to {replyTo.senderName}</p>
+            <p className="truncate text-ink-3">
               {replyTo.type === "TEXT" || !replyTo.metadata
                 ? replyTo.content || "(empty)"
                 : `📎 ${String(replyTo.metadata["filename"] ?? "Attachment")}`}
@@ -190,32 +197,39 @@ export function Composer({
             type="button"
             aria-label="Cancel reply"
             onClick={onCancelReply}
-            className="rounded px-1.5 py-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:hover:bg-slate-700"
+            className="rounded px-1.5 py-0.5 text-ink-3 hover:text-ink"
           >
             ✕
           </button>
         </div>
       )}
-      <div className="flex items-end gap-2">
-        <label className="cursor-pointer rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-500 hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">
+      <div className="mx-auto flex max-w-3xl items-end gap-2">
+        <button
+          type="button"
+          aria-label={uploading ? "Uploading…" : "Attach file"}
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-raised text-lg text-ink-2 transition-colors duration-fast hover:bg-high hover:text-ink disabled:opacity-50"
+        >
           <span aria-hidden>📎</span>
-          <span className="sr-only">Attach file</span>
-          <input
-            ref={inputRef}
-            type="file"
-            className="hidden"
-            disabled={uploading}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void uploadFile(file);
-            }}
-          />
-        </label>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          disabled={uploading}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void uploadFile(file);
+          }}
+        />
 
         <textarea
+          ref={inputRef}
           value={text}
           rows={1}
           aria-label="Message"
+          data-testid="composer-input"
           placeholder={uploading ? "Uploading…" : "Type a message… (/help for bot commands)"}
           disabled={uploading}
           onChange={(e) => {
@@ -228,16 +242,26 @@ export function Composer({
               send();
             }
           }}
-          className="max-h-32 min-h-[42px] flex-1 resize-none rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 dark:border-slate-600 dark:bg-slate-800"
+          onPaste={(e) => {
+            // Screenshot → paste sends the image directly (§32 nicety).
+            const file = e.clipboardData.files?.[0];
+            if (file && file.type.startsWith("image/")) {
+              e.preventDefault();
+              void uploadFile(file);
+            }
+          }}
+          className="max-h-40 min-h-[42px] flex-1 resize-none rounded-2xl bg-raised px-3.5 py-2.5 text-sm outline-none transition-colors duration-fast placeholder:text-ink-3 disabled:opacity-60"
         />
 
         <button
           type="button"
           onClick={send}
           disabled={!text.trim() || uploading}
-          className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:opacity-50"
+          aria-label="Send message"
+          data-testid="send-button"
+          className="flex h-10 shrink-0 items-center justify-center rounded-full bg-brand px-4 text-sm font-semibold text-on-brand transition-all duration-fast hover:bg-brand-strong disabled:opacity-40"
         >
-          Send
+          {uploading ? "…" : "Send"}
         </button>
       </div>
     </footer>

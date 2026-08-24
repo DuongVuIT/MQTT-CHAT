@@ -7,8 +7,10 @@ import { useChatStore } from "@/store/chat-store";
  * Global error surface (#191): the store's `error` was write-only — bootstrap,
  * upload, member-management and delete failures all reported into it and no
  * component ever rendered it, so users saw silent no-ops. ONE dismissible
- * banner renders whatever the flows report and auto-clears so a stale failure
- * cannot outlive the session state that produced it.
+ * toast renders whatever the flows report and auto-clears so a stale failure
+ * cannot outlive the session state that produced it. Positioned TOP-CENTER
+ * (§64) — the old bottom strip physically covered the composer, blocking the
+ * user from responding to exactly the failure it reported.
  */
 
 const AUTO_DISMISS_MS = 8_000;
@@ -26,16 +28,21 @@ export function ErrorBanner() {
   return (
     <div
       role="alert"
-      className="absolute inset-x-0 bottom-0 z-50 flex items-center justify-between gap-3 border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+      className="pointer-events-none absolute inset-x-0 top-3 z-banner flex justify-center px-4"
     >
-      <span className="min-w-0 truncate">{error}</span>
-      <button
-        type="button"
-        onClick={() => useChatStore.getState().setError(null)}
-        className="shrink-0 rounded px-2 py-0.5 font-medium hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-400 focus:outline-none dark:hover:bg-red-900"
-      >
-        Dismiss
-      </button>
+      <div className="animate-sheet-in pointer-events-auto flex max-w-lg items-center gap-3 rounded-xl border border-danger/30 bg-surface px-4 py-2 shadow-xl">
+        <span aria-hidden className="text-danger">
+          ⚠
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-ink">{error}</span>
+        <button
+          type="button"
+          onClick={() => useChatStore.getState().setError(null)}
+          className="shrink-0 rounded px-2 py-0.5 text-sm font-medium text-ink-2 hover:text-ink"
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   );
 }

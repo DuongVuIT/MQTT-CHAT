@@ -7,6 +7,18 @@ import type { ConnectionState } from "@/lib/realtime-service";
  * projection of canonical events + optimistic local sends.
  */
 
+// Incoming typing TTL (§49): `typing.stopped` rides QoS0 and the server's
+// Redis expiry is never re-broadcast — a lost frame would leave "X is
+// typing…" stuck forever. Each `typing.started` stamps a receipt; a sweep
+// drops entries older than the TTL.
+const TYPING_TTL_MS = 8000;
+const TYPING_SWEEP_MS = 2000;
+// Presence grace (§50): LWT publishes offline instantly on any drop and
+// clients reconnect ~2s later — without grace every network blip flickers
+// peers offline→online. Offline flips are held for this window; an online
+// event inside it cancels the flip silently.
+const PRESENCE_GRACE_MS = 10_000;
+
 export interface PendingMessage {
   clientMessageId: string;
   conversationId: string;
@@ -54,6 +66,8 @@ export interface ChatState {
   identity: { userId: string; deviceId: string } | null;
   users: ApiUser[];
   conversations: ApiConversation[];
+  /** Bootstrap roster fetch completed — distinguishes loading from empty. */
+  conversationsLoaded: boolean;
   activeConversationId: string | null;
   messagesByConversation: Record<string, ApiMessage[]>;
   pendingMessages: PendingMessage[];
@@ -73,6 +87,7 @@ export interface ChatState {
   resetTransient: () => void;
   setUsers: (users: ApiUser[]) => void;
   setConversations: (conversations: ApiConversation[]) => void;
+  setConversationsLoaded: (loaded: boolean) => void;
   /** Insert or replace a conversation (canonical conversation.created / refetch). */
   upsertConversation: (conversation: ApiConversation) => void;
   /**
@@ -179,10 +194,17 @@ function applyReactionPresence(
   return out;
 }
 
+// Ephemeral-state bookkeeping (never rendered directly):
+// typing receipts: conversationId → (userId → last `started` epoch ms)
+const typingSeen = new Map<string, Map<string, number>>();
+// presence grace: userId → timer that will apply the offline flip
+const presenceGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export const useChatStore = create<ChatState>((set) => ({
   identity: null,
   users: [],
   conversations: [],
+  conversationsLoaded: false,
   activeConversationId: null,
   messagesByConversation: {},
   pendingMessages: [],
@@ -197,6 +219,7 @@ export const useChatStore = create<ChatState>((set) => ({
   resetTransient: () =>
     set({
       conversations: [],
+      conversationsLoaded: false,
       activeConversationId: null,
       messagesByConversation: {},
       pendingMessages: [],
@@ -208,6 +231,7 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
   setUsers: (users) => set({ users }),
   setConversations: (conversations) => set({ conversations }),
+  setConversationsLoaded: (conversationsLoaded) => set({ conversationsLoaded }),
   upsertConversation: (conversation) =>
     set((s) => {
       const exists = s.conversations.some((c) => c.id === conversation.id);
@@ -373,16 +397,52 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setTyping: (conversationId, userId, isTyping) =>
     set((s) => {
+      // Self-echo: clients subscribe the shared conversation topic and
+      // receive their own typing events — never render yourself typing.
+      if (userId === s.identity?.userId) return s;
+      const seen = typingSeen.get(conversationId) ?? new Map<string, number>();
+      if (isTyping) {
+        seen.set(userId, Date.now());
+        typingSeen.set(conversationId, seen);
+      } else {
+        seen.delete(userId);
+      }
       const current = s.typingUsers[conversationId] ?? [];
       const next = isTyping
         ? current.includes(userId)
           ? current
-          : [...current, userId]
+          : [...current, userId].sort()
         : current.filter((u) => u !== userId);
+      if (next === current) return s; // no-op keeps references stable
       return { typingUsers: { ...s.typingUsers, [conversationId]: next } };
     }),
 
-  setPresence: (userId, online) => set((s) => ({ presence: { ...s.presence, [userId]: online } })),
+  setPresence: (userId, online) =>
+    set((s) => {
+      if (online) {
+        const pending = presenceGraceTimers.get(userId);
+        if (pending) {
+          clearTimeout(pending);
+          presenceGraceTimers.delete(userId);
+        }
+        return s.presence[userId] === true ? s : { presence: { ...s.presence, [userId]: true } };
+      }
+      // Offline: hold the flip for the grace window — a reconnect inside it
+      // cancels it, so blips never repaint the roster (§50).
+      if (presenceGraceTimers.has(userId)) return s;
+      presenceGraceTimers.set(
+        userId,
+        setTimeout(() => {
+          presenceGraceTimers.delete(userId);
+          set((cur) =>
+            cur.presence[userId] === false
+              ? cur
+              : { presence: { ...cur.presence, [userId]: false } },
+          );
+        }, PRESENCE_GRACE_MS),
+      );
+      return s;
+    }),
 
   applyReadReceipt: (conversationId, userId, lastReadSequence) =>
     set((s) => ({
@@ -404,3 +464,26 @@ export const useChatStore = create<ChatState>((set) => ({
   setLoadingHistory: (loadingHistory) => set({ loadingHistory }),
   setError: (error) => set({ error }),
 }));
+
+// Incoming-typing TTL sweep (§49): drops typers whose last `typing.started`
+// is older than the TTL — a lost QoS0 `typing.stopped` can never wedge the
+// indicator on.
+setInterval(() => {
+  if (typingSeen.size === 0) return;
+  const now = Date.now();
+  for (const [conversationId, seen] of typingSeen) {
+    const current = useChatStore.getState().typingUsers[conversationId];
+    if (!current || current.length === 0) continue;
+    const alive = current.filter((u) => {
+      const at = seen.get(u);
+      const expired = at !== undefined && now - at >= TYPING_TTL_MS;
+      if (expired) seen.delete(u);
+      return !expired;
+    });
+    if (alive.length !== current.length) {
+      useChatStore.setState((s) => ({
+        typingUsers: { ...s.typingUsers, [conversationId]: alive },
+      }));
+    }
+  }
+}, TYPING_SWEEP_MS);

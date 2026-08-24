@@ -13,12 +13,14 @@ import { Composer } from "@/components/Composer";
 import { DetailsPanel } from "@/components/DetailsPanel";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
-import { ConnectionBadge } from "@mqtt-chat/ui";
+import { Avatar, ConnectionBadge } from "@mqtt-chat/ui";
 import type { EventEnvelope } from "@mqtt-chat/mqtt-contracts";
 
 /**
- * Main chat shell. Wires realtime events into the store and renders the
- * 3-column desktop layout (sidebar / conversation / details).
+ * Main chat shell v2 (§26): three-area workspace — conversations / chat /
+ * details. Details is collapsible on desktop and becomes a drawer below
+ * `lg`; the sidebar collapses below `md`. Connection state is a subtle dot
+ * during normal operation (§29) and a labelled pill only when degraded.
  */
 
 export default function ChatPage() {
@@ -32,19 +34,22 @@ export default function ChatPage() {
     (s) => s.conversations.find((c) => c.id === s.activeConversationId) ?? null,
   );
   const identityUserId = useChatStore((s) => s.identity?.userId);
-  const connectionState = useChatStore((s) => s.connectionState);
   const users = useChatStore((s) => s.users);
+  const connectionState = useChatStore((s) => s.connectionState);
   const bootstrapped = useRef(false);
   // Previous transport state — used to detect reconnect transitions
   // (reconnecting/disconnected → connected) and trigger state recovery.
   const prevConnectionState = useRef<ConnectionState | null>(null);
   // Reply target for the composer — canonical messageId of an existing message.
   const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
+  // Drawer state for narrow viewports (§26): details → overlay drawer.
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const activeConversationId = activeId;
 
   // Switching conversations must never carry a stale reply target over.
   useEffect(() => {
     setReplyTo(null);
+    setDetailsOpen(false);
   }, [activeConversationId]);
 
   // Bootstrap: identity → REST data → MQTT connect → subscriptions.
@@ -102,6 +107,7 @@ export default function ChatPage() {
         const s = useChatStore.getState();
         s.setUsers(usersRes.users);
         s.setConversations(convRes.conversations);
+        s.setConversationsLoaded(true);
         // Presence starts UNKNOWN for everyone — never assume offline.
         // Apply the server-authoritative snapshot once it arrives.
         try {
@@ -136,21 +142,60 @@ export default function ChatPage() {
     return peer?.displayName ?? peerId ?? "Direct chat";
   })();
 
+  const activeSubtitle = activeConversation
+    ? activeConversation.type === "GROUP"
+      ? `${activeConversation.memberCount} members`
+      : "Direct message"
+    : "";
+  const headerAvatarName =
+    activeConversation?.type === "GROUP"
+      ? (activeConversation.title ?? "Group")
+      : activeTitle || "?";
+
   return (
-    <div className="relative flex h-screen">
-      <Sidebar />
+    <div className="relative flex h-screen overflow-hidden bg-app">
+      {/* Sidebar: static ≥md, drawer below (§26). */}
+      <div className="hidden md:flex">
+        <Sidebar />
+      </div>
+      {detailsOpen && (
+        <div
+          className="absolute inset-0 z-40 flex md:hidden"
+          role="dialog"
+          aria-label="Conversations"
+        >
+          <div className="flex h-full">
+            <Sidebar />
+          </div>
+          <button
+            type="button"
+            aria-label="Close conversations"
+            className="flex-1 bg-scrim"
+            onClick={() => setDetailsOpen(false)}
+          />
+        </div>
+      )}
+
       <main className="flex min-w-0 flex-1 flex-col">
         {activeConversation ? (
           <>
-            <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-              <div className="min-w-0">
-                <h2 className="truncate font-semibold">{activeTitle}</h2>
-                <p className="text-xs text-slate-500">
-                  {activeConversation.type === "GROUP"
-                    ? `${activeConversation.memberCount} members`
-                    : "Direct conversation"}
-                </p>
+            <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  aria-label="Open conversations"
+                  onClick={() => setDetailsOpen(true)}
+                  className="rounded-lg px-1 text-ink-2 hover:text-ink md:hidden"
+                >
+                  ☰
+                </button>
+                <Avatar name={headerAvatarName} size="sm" />
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-semibold">{activeTitle}</h2>
+                  <p className="truncate text-xs text-ink-3">{activeSubtitle}</p>
+                </div>
               </div>
+              {/* Subtle dot when healthy; labelled pill only when degraded. */}
               <ConnectionBadge state={connectionState} />
             </header>
             <MessageList conversationId={activeConversation.id} onRequestReply={setReplyTo} />
@@ -161,12 +206,63 @@ export default function ChatPage() {
             />
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center text-slate-400">
-            Select a conversation to start chatting
-          </div>
+          <>
+            <header className="flex items-center gap-3 border-b border-line px-4 py-2.5 md:hidden">
+              <button
+                type="button"
+                aria-label="Open conversations"
+                onClick={() => setDetailsOpen(true)}
+                className="rounded-lg px-1 text-ink-2 hover:text-ink"
+              >
+                ☰
+              </button>
+              <h2 className="text-sm font-semibold">Chats</h2>
+            </header>
+            {/* Empty state (§28) — tasteful, never an enormous blank panel. */}
+            <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+              <span
+                aria-hidden
+                className="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface text-3xl"
+              >
+                💬
+              </span>
+              <p className="mt-4 text-sm font-semibold">Select a conversation</p>
+              <p className="mt-1 max-w-xs text-xs leading-5 text-ink-3">
+                Pick a chat on the left, or start a new one with the + button.
+              </p>
+            </div>
+          </>
         )}
       </main>
-      <DetailsPanel conversation={activeConversation} />
+
+      {/* Details: static rail ≥lg, drawer below (§26). */}
+      <div className="hidden lg:flex">
+        <DetailsPanel conversation={activeConversation} />
+      </div>
+      {detailsOpen && activeConversation && (
+        <div className="absolute inset-0 z-40 flex lg:hidden" role="dialog" aria-label="Details">
+          <div className="flex h-full">
+            <DetailsPanel conversation={activeConversation} onClose={() => setDetailsOpen(false)} />
+          </div>
+          <button
+            type="button"
+            aria-label="Close details"
+            className="flex-1 bg-scrim"
+            onClick={() => setDetailsOpen(false)}
+          />
+        </div>
+      )}
+      {activeConversation && (
+        <button
+          type="button"
+          aria-label="Show details"
+          onClick={() => setDetailsOpen(true)}
+          className="absolute right-3 top-16 z-10 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink-2 shadow-md transition-colors duration-fast hover:bg-raised lg:hidden"
+        >
+          Details
+        </button>
+      )}
+
       <DiagnosticsPanel />
       <ErrorBanner />
     </div>
@@ -197,7 +293,6 @@ function handleEvent(envelope: EventEnvelope): void {
   const data = envelope.data as Record<string, unknown>;
   const conversationId = envelope.conversationId ?? String(data["conversationId"] ?? "");
 
-  /** Parse a canonical conversation summary into the REST list-item shape. */
   /** ONE shared normalizer for every conversation entering the web UI. */
   const toConversation = (): ApiConversation => {
     const conversation = normalizeConversation({ ...data, id: data["id"] ?? conversationId });
@@ -272,6 +367,15 @@ function handleEvent(envelope: EventEnvelope): void {
       const sequence = message.sequence;
       const type = message.type;
       const content = message.content;
+      // Sequence-gap detection must read the watermark BEFORE the store
+      // advances it — reading `lastKnown` after applyMessageActivity made
+      // `sequence > lastKnown + 1` unreachable (dead recovery path, audit
+      // P0). Capture first, apply, then heal if the event jumped a gap.
+      const convBefore = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+      const lastKnownBefore = Math.max(
+        convBefore?.lastSequence ?? 0,
+        lastKnownByMessages(conversationId),
+      );
       s.upsertMessage(message);
       // Keep the conversation list entry in sync (lastSequence/preview/time)
       // so every client converges on the same server-side sequence.
@@ -281,13 +385,8 @@ function handleEvent(envelope: EventEnvelope): void {
         preview: content ? preview : null,
         at: envelope.timestamp,
       });
-      // Sequence-gap detection: a canonical event jumping beyond last+1 means
-      // events were missed (offline window, broker drop). Fetch the missing
-      // range from history and merge — never render a silent gap.
-      const conv = useChatStore.getState().conversations.find((c) => c.id === conversationId);
-      const lastKnown = conv?.lastSequence ?? 0;
-      if (Number.isFinite(sequence) && sequence > lastKnown + 1) {
-        void recoverSequenceGap(conversationId, lastKnown);
+      if (Number.isFinite(sequence) && sequence > lastKnownBefore + 1) {
+        void recoverSequenceGap(conversationId, lastKnownBefore);
       }
       // Resolve optimistic pending send.
       const clientMessageId = String(data["clientMessageId"] ?? "");
@@ -372,6 +471,13 @@ function handleEvent(envelope: EventEnvelope): void {
   }
 }
 
+/** Highest sequence cached for a conversation (0 when none) — the transcript
+ *  watermark can lead the list summary, and gap detection must use the MAX. */
+function lastKnownByMessages(conversationId: string): number {
+  const list = useChatStore.getState().messagesByConversation[conversationId];
+  return list && list.length > 0 ? (list[list.length - 1]?.sequence ?? 0) : 0;
+}
+
 /** Guard against concurrent gap recovery for the same conversation. */
 const gapRecovering = new Set<string>();
 
@@ -396,11 +502,13 @@ async function recoverSequenceGap(conversationId: string, afterSequence: number)
 
 /**
  * Refetch server state after an MQTT reconnect: conversation list (fresh
- * lastSequence/preview/unread) + active conversation messages. This heals
- * any events missed while the transport was down.
+ * lastSequence/preview/unread) + active conversation healed SEQ-SCOPED —
+ * the old latest-50 REPLACE destroyed paginated history and reset scroll
+ * after every reconnect (audit P1); ?after=<watermark> merged by id heals
+ * exactly the missed window instead.
  */
 async function recoverAfterReconnect(): Promise<void> {
-  const { identity, activeConversationId } = useChatStore.getState();
+  const { identity, activeConversationId, messagesByConversation } = useChatStore.getState();
   if (!identity) return;
   try {
     const convRes = await api.listConversations(identity.userId);
@@ -408,8 +516,16 @@ async function recoverAfterReconnect(): Promise<void> {
     store.setConversations(convRes.conversations);
     for (const c of convRes.conversations) getRealtimeService().subscribeConversation(c.id);
     if (activeConversationId) {
-      const res = await api.getMessages(activeConversationId, { limit: 50 });
-      useChatStore.getState().setMessages(activeConversationId, res.messages, res.hasMore);
+      const cached = messagesByConversation[activeConversationId] ?? [];
+      const watermark = cached[cached.length - 1]?.sequence ?? 0;
+      if (watermark > 0) {
+        const res = await api.getMessages(activeConversationId, { after: watermark, limit: 100 });
+        const s = useChatStore.getState();
+        for (const message of res.messages) s.upsertMessage(message);
+      } else {
+        const res = await api.getMessages(activeConversationId, { limit: 50 });
+        useChatStore.getState().setMessages(activeConversationId, res.messages, res.hasMore);
+      }
     }
   } catch {
     // Transient — the next reconnect cycle retries recovery.
