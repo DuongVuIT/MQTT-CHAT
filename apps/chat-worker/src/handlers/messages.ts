@@ -96,6 +96,16 @@ export async function handleMessageSend(
     return;
   }
 
+  // Tombstoned groups accept no further sends (#28) — deterministic reject.
+  const conversation = await ctx.db.conversation.findUnique({
+    where: { id: data.conversationId },
+    select: { deletedAt: true },
+  });
+  if (conversation?.deletedAt) {
+    rejectSend(ctx, envelope, "conversation was deleted");
+    return;
+  }
+
   // Reply target validation (#19): must exist and belong to the SAME
   // conversation — otherwise the send is rejected deterministically.
   if (data.replyToId) {
