@@ -267,6 +267,9 @@ const SUITES = [
   // TypeScript suite (shared client + the app's REAL conversation reducer):
   // Web→Mobile group discovery + immediate-send lifecycle.
   "scripts/web-mobile-discovery-e2e.mts",
+  // TypeScript suite: media MIME normalization (image/jpg alias) + reply
+  // lifecycle incl. deterministic message.rejected failure (#26, #27).
+  "scripts/media-reply-e2e.mts",
 ];
 
 /** .mts suites are TypeScript — run them through tsx. */
