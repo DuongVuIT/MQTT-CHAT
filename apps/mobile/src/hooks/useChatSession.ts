@@ -65,7 +65,10 @@ export function useChatSession(identity: Identity | null) {
       try {
         const [us, convs] = await Promise.all([
           api.listUsers(),
-          api.listConversations(),
+          // Identity-scoped: without userId the API returns EVERY user's
+          // conversations — other people's DMs rendered as "duplicate"
+          // contacts in the list (duplicate-Alice trigger on mobile).
+          api.listConversations(identity?.userId),
         ]);
         if (cancelled) return;
         setUsers(us);
@@ -402,9 +405,9 @@ export function useChatSession(identity: Identity | null) {
 
   /** Safety-net refetch (mutations also reconcile via canonical events). */
   const refreshConversations = useCallback(async () => {
-    const convs = await api.listConversations();
+    const convs = await api.listConversations(identity?.userId);
     setConversations(convs);
-  }, []);
+  }, [identity?.userId]);
 
   const retryMessage = useCallback(
     async (clientMessageId: string) => {

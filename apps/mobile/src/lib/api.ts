@@ -62,10 +62,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listUsers: () => request<{ users: ApiUser[] }>('/users').then(r => r.users),
-  listConversations: () =>
-    request<{ conversations: ApiConversation[] }>('/conversations').then(
-      r => r.conversations,
-    ),
+  /** MUST pass the identity userId: without it the API returns EVERY user's
+   * conversations (the server only filters when userId is present) — every
+   * other user's DM with a peer rendered as a "duplicate" contact. */
+  listConversations: (userId?: string) =>
+    request<{ conversations: ApiConversation[] }>(
+      `/conversations${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`,
+    ).then(r => r.conversations),
   getMessages: (conversationId: string, limit = 50) =>
     request<{ messages: ApiMessage[]; hasMore: boolean }>(
       `/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`,
