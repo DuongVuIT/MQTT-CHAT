@@ -22,6 +22,50 @@ function check(ok, label, detail = "") {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Exact-ID teardown that runs on SUCCESS and on ANY failure path (#194) —
+ * previously a FATAL between fixture creation and cleanup stranded rows in
+ * mqtt_chat_test forever. Push cleanup thunks as their target comes into
+ * existence; they execute in REVERSE registration order (users last, so FK
+ * constraints are satisfied).
+ */
+const suiteCleanups: Array<() => Promise<unknown>> = [];
+let suiteCleanedUp = false;
+async function runSuiteCleanups(): Promise<void> {
+  if (suiteCleanedUp) return;
+  suiteCleanedUp = true;
+  for (const fn of suiteCleanups.reverse()) {
+    try {
+      await fn();
+    } catch {
+      /* best effort — a failing cleanup must never mask the real result */
+    }
+  }
+}
+
+/** Hard-delete conversation rows via psql — DIRECT pairs refuse API deletes. */
+async function psqlDeleteConversations(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const { execFileSync } = await import("node:child_process");
+  const container = execFileSync("docker", ["ps", "-qf", "name=postgres"]).toString().trim();
+  const db = process.env.TEST_DB_NAME ?? "mqtt_chat_test"; // isolated suite DB
+  execFileSync(
+    "docker",
+    [
+      "exec",
+      container,
+      "psql",
+      "-U",
+      "mqtt",
+      "-d",
+      db,
+      "-c",
+      `DELETE FROM "Conversation" WHERE id IN ('${ids.join("', '")}')`,
+    ],
+    { encoding: "utf8" },
+  );
+}
+
 async function createUser(id, displayName) {
   const res = await fetch(`${API}/users`, {
     method: "POST",
@@ -49,6 +93,11 @@ async function main() {
   await createUser(A, `Owner ${run}`);
   await createUser(B, `Member B ${run}`);
   await createUser(C, `Member C ${run}`);
+  suiteCleanups.push(
+    () => fetch(`${API}/users/${A}`, { method: "DELETE" }),
+    () => fetch(`${API}/users/${B}`, { method: "DELETE" }),
+    () => fetch(`${API}/users/${C}`, { method: "DELETE" }),
+  );
 
   // ---- 1. Create + realtime discovery ------------------------------------
   const createdRes = await fetch(`${API}/conversations`, {
@@ -63,11 +112,19 @@ async function main() {
   });
   const conv = (await createdRes.json()).conversation;
   check(createdRes.ok && Boolean(conv?.id), "group created", String(createdRes.status));
+  suiteCleanups.push(() =>
+    fetch(`${API}/conversations/${conv.id}?actor=${encodeURIComponent(A)}`, { method: "DELETE" }),
+  );
 
   const obsA = observe({ userId: A, deviceId: `dev-${run}` });
   const obsB = observe({ userId: B, deviceId: `dev-${run}` });
   const obsC = observe({ userId: C, deviceId: `dev-${run}` });
   await Promise.all([obsA.client.connect(), obsB.client.connect(), obsC.client.connect()]);
+  suiteCleanups.push(
+    () => obsA.client.disconnect(),
+    () => obsB.client.disconnect(),
+    () => obsC.client.disconnect(),
+  );
 
   let bSawCreate = false;
   let cSawCreate = false;
@@ -139,6 +196,10 @@ async function main() {
     body: JSON.stringify({ type: "DIRECT", createdBy: A, memberIds: [A, B] }),
   });
   const direct = (await directRes.json()).conversation;
+  // DIRECT pairs cannot be tombstoned over the API (400 by design) — they go
+  // through a psql exact-ID sweep at teardown instead.
+  const hardDeleteConvIds = [direct.id];
+  suiteCleanups.push(() => psqlDeleteConversations(hardDeleteConvIds));
   const directDelete = await fetch(
     `${API}/conversations/${direct.id}?actor=${encodeURIComponent(A)}`,
     { method: "DELETE" },
@@ -194,6 +255,9 @@ async function main() {
     body: JSON.stringify({ type: "GROUP", title: `solo-${run}`, createdBy: A, memberIds: [A, C] }),
   });
   const solo = (await soloRes.json()).conversation;
+  suiteCleanups.push(() =>
+    fetch(`${API}/conversations/${solo.id}?actor=${encodeURIComponent(A)}`, { method: "DELETE" }),
+  );
   const drainC = await fetch(
     `${API}/conversations/${solo.id}/members/${encodeURIComponent(C)}?actor=${encodeURIComponent(A)}`,
     { method: "DELETE" },
@@ -213,6 +277,17 @@ async function main() {
     body: JSON.stringify({ type: "GROUP", title: `xfer-${run}`, createdBy: A, memberIds: [A, B] }),
   });
   const xfer = (await xferRes.json()).conversation;
+  suiteCleanups.push(async () => {
+    // After the promotion test B is ADMIN; A is the fallback if that check
+    // never ran. Whichever works, the row must not strand.
+    for (const actor of [B, A]) {
+      const res = await fetch(
+        `${API}/conversations/${xfer.id}?actor=${encodeURIComponent(actor)}`,
+        { method: "DELETE" },
+      );
+      if (res.ok || res.status === 404) return;
+    }
+  });
   const adminLeave = await fetch(
     `${API}/conversations/${xfer.id}/members/${encodeURIComponent(A)}?actor=${encodeURIComponent(A)}`,
     { method: "DELETE" },
@@ -344,23 +419,13 @@ async function main() {
   const dbCheck = await fetch(`${API}/health`).then((r) => r.json());
   check(dbCheck.database === "up", "stack healthy after lifecycle");
 
-  await obsA.client.disconnect();
-  await obsB.client.disconnect();
-  await obsC.client.disconnect();
-
-  // ---- 7. Cleanup exact IDs ----------------------------------------------
-  await fetch(`${API}/conversations/${direct.id}?actor=${encodeURIComponent(A)}`, {
-    method: "DELETE",
-  }).catch(() => {});
-  await fetch(`${API}/users/${A}`, { method: "DELETE" });
-  await fetch(`${API}/users/${B}`, { method: "DELETE" });
-  await fetch(`${API}/users/${C}`, { method: "DELETE" });
-
   console.log(failed ? "GROUP-LIFECYCLE E2E FAILED" : "GROUP-LIFECYCLE E2E DONE — ALL PASS");
+  await runSuiteCleanups();
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("FATAL:", err);
+  await runSuiteCleanups();
   process.exit(1);
 });

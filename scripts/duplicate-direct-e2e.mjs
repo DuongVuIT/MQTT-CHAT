@@ -22,6 +22,37 @@ const suffix = Date.now();
 const userA = { id: `e2e-ua-${suffix}`, displayName: `E2E User A ${suffix}` };
 const userB = { id: `e2e-ub-${suffix}`, displayName: `E2E User B ${suffix}` };
 
+// Teardown runs on SUCCESS and on ANY failure path (#194): every fixture id
+// carries the unique suffix (pair keys embed the user ids; the legacy row is
+// conv-legacy-<suffix>), so a suffix sweep is exact-ID deletion for this
+// suite — previously a mid-suite throw stranded all of it forever.
+const { execFileSync } = await import("node:child_process");
+const dbForSuite = process.env.TEST_DB_NAME ?? "mqtt_chat_test"; // isolated suite DB
+let tornDown = false;
+function runTeardown() {
+  if (tornDown) return;
+  tornDown = true;
+  try {
+    const container = execFileSync("docker", ["ps", "-qf", "name=postgres"]).toString().trim();
+    const sql = `
+DELETE FROM "Conversation" WHERE "directPairKey" LIKE '%${suffix}' OR id = 'conv-legacy-${suffix}';
+DELETE FROM "User" WHERE id IN ('${[userA.id, userB.id].join("', '")}', 'e2e-uc-${suffix}', 'e2e-ud-${suffix}');
+`;
+    execFileSync(
+      "docker",
+      ["exec", "-i", container, "psql", "-U", "mqtt", "-d", dbForSuite, "-c", sql],
+      { encoding: "utf8" },
+    );
+  } catch {
+    /* best effort — a failing cleanup must never mask the real result */
+  }
+}
+process.on("unhandledRejection", (err) => {
+  console.error("FATAL:", err);
+  runTeardown();
+  process.exit(1);
+});
+
 for (const u of [userA, userB]) {
   const res = await fetch(`${API}/users`, {
     method: "POST",
@@ -57,7 +88,6 @@ check(anyReused, "at least one request reported reused=true");
 
 // DB authority: exactly one DIRECT row for this pair (psql — scripts are not
 // a workspace package, so workspace deps are not resolvable here).
-const { execFileSync } = await import("node:child_process");
 const container = execFileSync("docker", ["ps", "-qf", "name=postgres"]).toString().trim();
 const pairKey = [userA.id, userB.id].sort().join(":");
 const sql = `SELECT c.id, c."directPairKey" FROM "Conversation" c
@@ -187,29 +217,9 @@ check(
 );
 
 // Teardown: exact IDs via psql (DIRECT rows cannot be deleted over the API
-// by design — tombstone endpoint rejects them with 400).
-const teardownSql = `
-DELETE FROM "Conversation" WHERE id IN ('${[...ids].join("', '")}', '${legacyId}');
-DELETE FROM "User" WHERE id IN ('${userA.id}', '${userB.id}', '${legacyUserC.id}', '${legacyUserD.id}');
-`;
-execFileSync(
-  "docker",
-  [
-    "exec",
-    "-i",
-    container,
-    "psql",
-    "-U",
-    "mqtt",
-    "-d",
-    dbForLegacy,
-    "-v",
-    "ON_ERROR_STOP=1",
-    "-c",
-    teardownSql,
-  ],
-  { encoding: "utf8" },
-);
+// by design — tombstone endpoint rejects them with 400). Same sweep doubles
+// as the failure-path cleanup registered at the top of the file.
+runTeardown();
 
 console.log(failed ? "DUPLICATE-DIRECT E2E FAILED" : "DUPLICATE-DIRECT E2E DONE");
 process.exit(failed ? 1 : 0);

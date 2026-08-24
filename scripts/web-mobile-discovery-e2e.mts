@@ -26,6 +26,25 @@ function check(ok: boolean, label: string, detail = ""): void {
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Exact-ID teardown running on SUCCESS and on ANY failure path (#194) —
+ * a FATAL between fixture creation and cleanup used to strand rows in
+ * mqtt_chat_test forever.
+ */
+const suiteCleanups: Array<() => Promise<unknown>> = [];
+let suiteCleanedUp = false;
+async function runSuiteCleanups(): Promise<void> {
+  if (suiteCleanedUp) return;
+  suiteCleanedUp = true;
+  for (const fn of suiteCleanups.reverse()) {
+    try {
+      await fn();
+    } catch {
+      /* best effort — a failing cleanup must never mask the real result */
+    }
+  }
+}
+
 async function createUser(id: string, displayName: string): Promise<void> {
   const res = await fetch(`${API}/users`, {
     method: "POST",
@@ -41,6 +60,10 @@ async function main(): Promise<void> {
   const mobileUser = `u-${run}-mob`;
   await createUser(webUser, `Web User ${run}`);
   await createUser(mobileUser, `Mobile User ${run}`);
+  suiteCleanups.push(
+    () => fetch(`${API}/users/${webUser}`, { method: "DELETE" }),
+    () => fetch(`${API}/users/${mobileUser}`, { method: "DELETE" }),
+  );
 
   // ---- Mobile side: shared client + the app's REAL reducer ---------------
   const events: RealtimeEvent[] = [];
@@ -62,6 +85,7 @@ async function main(): Promise<void> {
     },
   });
   await mobile.connect();
+  suiteCleanups.push(() => mobile.disconnect());
 
   // ---- Web side creates a group including the mobile identity ------------
   const groupName = `discovery-${run}`;
@@ -80,6 +104,11 @@ async function main(): Promise<void> {
     createdRes.ok && Boolean(created.conversation?.id),
     "web created group",
     created.conversation?.id,
+  );
+  suiteCleanups.push(() =>
+    fetch(`${API}/conversations/${created.conversation.id}?actor=${encodeURIComponent(webUser)}`, {
+      method: "DELETE",
+    }),
   );
 
   // ---- Mobile discovers WITHOUT reload (bounded wait, no sleeps-as-readiness)
@@ -151,6 +180,7 @@ async function main(): Promise<void> {
   // (a nonexistent id would just trip the API's FK guard and prove nothing).
   const extraUser = `u-${run}-extra`;
   await createUser(extraUser, `Extra User ${run}`);
+  suiteCleanups.push(() => fetch(`${API}/users/${extraUser}`, { method: "DELETE" }));
   const addRes = await fetch(
     `${API}/conversations/${created.conversation.id}/members?actor=${encodeURIComponent(webUser)}`,
     {
@@ -177,26 +207,17 @@ async function main(): Promise<void> {
     Boolean(joined?.conversation?.members?.some((m) => m.userId === extraUser)),
     "post-change member summary carries the added user",
   );
-  await fetch(`${API}/users/${extraUser}`, { method: "DELETE" });
-
-  // ---- Cleanup: exact IDs -------------------------------------------------
-  await fetch(
-    `${API}/conversations/${created.conversation.id}?actor=${encodeURIComponent(webUser)}`,
-    {
-      method: "DELETE",
-    },
-  );
-  await fetch(`${API}/users/${webUser}`, { method: "DELETE" });
-  await fetch(`${API}/users/${mobileUser}`, { method: "DELETE" });
   await mobile.disconnect();
 
   console.log(
     failed ? "WEB-MOBILE DISCOVERY E2E FAILED" : "WEB-MOBILE DISCOVERY E2E DONE — ALL PASS",
   );
+  await runSuiteCleanups();
   process.exit(failed ? 1 : 0);
 }
 
-void main().catch((err) => {
+void main().catch(async (err) => {
   console.error("FATAL:", err);
+  await runSuiteCleanups();
   process.exit(1);
 });

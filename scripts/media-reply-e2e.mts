@@ -26,6 +26,25 @@ function check(ok: boolean, label: string, detail = ""): void {
   console.log(`${ok ? "PASS" : "FAIL"} ${label}${detail ? `: ${detail}` : ""}`);
   if (!ok) failed = true;
 }
+
+/**
+ * Exact-ID teardown running on SUCCESS and on ANY failure path (#194) —
+ * a FATAL between fixture creation and cleanup used to strand rows in
+ * mqtt_chat_test forever.
+ */
+const suiteCleanups: Array<() => Promise<unknown>> = [];
+let suiteCleanedUp = false;
+async function runSuiteCleanups(): Promise<void> {
+  if (suiteCleanedUp) return;
+  suiteCleanedUp = true;
+  for (const fn of suiteCleanups.reverse()) {
+    try {
+      await fn();
+    } catch {
+      /* best effort — a failing cleanup must never mask the real result */
+    }
+  }
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function createUser(id: string, displayName: string): Promise<void> {
@@ -43,6 +62,10 @@ async function main(): Promise<void> {
   const userB = `u-${run}-b`;
   await createUser(userA, `Media Reply A ${run}`);
   await createUser(userB, `Media Reply B ${run}`);
+  suiteCleanups.push(
+    () => fetch(`${API}/users/${userA}`, { method: "DELETE" }),
+    () => fetch(`${API}/users/${userB}`, { method: "DELETE" }),
+  );
 
   const convRes = await fetch(`${API}/conversations`, {
     method: "POST",
@@ -57,6 +80,11 @@ async function main(): Promise<void> {
   const conv = ((await convRes.json()) as { conversation: { id: string } }).conversation;
   check(convRes.ok && Boolean(conv?.id), "group created", conv?.id ?? String(convRes.status));
   const conversationId = conv.id;
+  suiteCleanups.push(() =>
+    fetch(`${API}/conversations/${conversationId}?actor=${encodeURIComponent(userA)}`, {
+      method: "DELETE",
+    }),
+  );
 
   // ---- 1. MEDIA MIME ------------------------------------------------------
   /** Upload a REAL fixture file with the given declared MIME. */
@@ -131,6 +159,7 @@ async function main(): Promise<void> {
     },
   });
   await sender.connect();
+  suiteCleanups.push(() => sender.disconnect());
 
   const baseCmid = `base-${run}`;
   await sender.sendMessage({
@@ -216,18 +245,13 @@ async function main(): Promise<void> {
 
   await sender.disconnect();
 
-  // ---- 4. Cleanup exact IDs ----------------------------------------------
-  await fetch(`${API}/conversations/${conversationId}?actor=${encodeURIComponent(userA)}`, {
-    method: "DELETE",
-  });
-  await fetch(`${API}/users/${userA}`, { method: "DELETE" });
-  await fetch(`${API}/users/${userB}`, { method: "DELETE" });
-
   console.log(failed ? "MEDIA-REPLY E2E FAILED" : "MEDIA-REPLY E2E DONE — ALL PASS");
+  await runSuiteCleanups();
   process.exit(failed ? 1 : 0);
 }
 
-void main().catch((err) => {
+void main().catch(async (err) => {
   console.error("FATAL:", err);
+  await runSuiteCleanups();
   process.exit(1);
 });

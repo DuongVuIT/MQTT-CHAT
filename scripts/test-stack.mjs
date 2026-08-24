@@ -282,11 +282,29 @@ function suiteCommand(suite) {
     : { cmd: "node", args: [suite] };
 }
 
+/** Per-suite watchdog (#194): a wedged suite must not hold the stack forever. */
+const SUITE_TIMEOUT_MS = Number(process.env.TEST_SUITE_TIMEOUT_MS ?? 120_000);
+
 // Only orchestrate when invoked directly (not imported for the fixture helper).
 if (
   import.meta.url === `file://${process.argv[1]}` ||
   process.argv[1]?.endsWith("test-stack.mjs")
 ) {
+  // Ctrl-C / SIGTERM must run the SAME teardown as the normal path — the
+  // service children are detached process-group leaders, so an abrupt exit
+  // leaks the whole stack (bug #25 class). --keep intentionally persists.
+  const onSignal = async (signal) => {
+    console.log(`\n[test-stack] received ${signal}`);
+    if (!process.argv.includes("--keep")) {
+      await teardown();
+      process.exit(130);
+    }
+    console.log("[test-stack] --keep: leaving the stack running.");
+    process.exit(130);
+  };
+  process.on("SIGINT", () => void onSignal("SIGINT"));
+  process.on("SIGTERM", () => void onSignal("SIGTERM"));
+
   withTestStack(async (api) => {
     let failed = false;
     for (const suite of SUITES) {
@@ -303,7 +321,16 @@ if (
         },
       });
       children.push(child);
-      const code = await new Promise((r) => child.on("exit", r));
+      const code = await new Promise((r) => {
+        const timer = setTimeout(() => {
+          console.log(`[test-stack] ⏱ ${suite} exceeded ${SUITE_TIMEOUT_MS}ms — killing suite`);
+          child.kill("SIGKILL");
+        }, SUITE_TIMEOUT_MS);
+        child.on("exit", (c) => {
+          clearTimeout(timer);
+          r(c);
+        });
+      });
       if (code !== 0) {
         failed = true;
         console.log(`[test-stack] ✗ ${suite} FAILED (${code})`);
