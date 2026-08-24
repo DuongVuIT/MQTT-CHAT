@@ -71,9 +71,9 @@ export interface ChatState {
   markPendingFailed: (clientMessageId: string) => void;
   /** Return a failed pending message to "pending" before re-publishing. */
   retryPending: (clientMessageId: string) => void;
-  updateMessage: (messageId: string, patch: Partial<ApiMessage>) => void;
-  removeMessage: (messageId: string) => void;
-  toggleReaction: (messageId: string, emoji: string, userId: string) => void;
+  updateMessage: (messageId: string, patch: Partial<ApiMessage>, conversationId?: string) => void;
+  removeMessage: (messageId: string, conversationId?: string) => void;
+  toggleReaction: (messageId: string, emoji: string, userId: string, conversationId?: string) => void;
   setTyping: (conversationId: string, userId: string, isTyping: boolean) => void;
   setPresence: (userId: string, online: boolean) => void;
   /** Update a member's read watermark; tolerates conversations missing `members`. */
@@ -85,6 +85,41 @@ export interface ChatState {
 
 const sortMessages = (messages: ApiMessage[]): ApiMessage[] =>
   [...messages].sort((a, b) => a.sequence - b.sequence);
+
+/** Reaction toggle for ONE message list — shared by both toggle paths. */
+function applyToggleList(
+  list: ApiMessage[],
+  messageId: string,
+  emoji: string,
+  userId: string,
+): ApiMessage[] {
+  return list.map((m) => {
+    if (m.id !== messageId) return m;
+    // Defensive: reactions is contractually an array, but a malformed
+    // row must not crash the whole store update.
+    const reactions = m.reactions ?? [];
+    const existing = reactions.find((r) => r.emoji === emoji && r.userId === userId);
+    return {
+      ...m,
+      reactions: existing
+        ? reactions.filter((r) => r !== existing)
+        : [...reactions, { emoji, userId }],
+    };
+  });
+}
+
+function applyToggle(
+  cache: Record<string, ApiMessage[]>,
+  conversationId: string,
+  messageId: string,
+  emoji: string,
+  userId: string,
+): Record<string, ApiMessage[]> {
+  return {
+    ...cache,
+    [conversationId]: applyToggleList(cache[conversationId] ?? [], messageId, emoji, userId),
+  };
+}
 
 export const useChatStore = create<ChatState>((set) => ({
   identity: null,
@@ -219,48 +254,66 @@ export const useChatStore = create<ChatState>((set) => ({
       ),
     })),
 
-  updateMessage: (messageId, patch) =>
+  /**
+   * PERF: when `conversationId` is supplied the mutation touches exactly ONE
+   * cached list; every other conversation keeps its array reference, so memo
+   * rows and per-conversation subscriptions do not invalidate. Without it the
+   * (slower) whole-cache scan applies — callers should pass the id when the
+   * canonical event carries one.
+   */
+  updateMessage: (messageId, patch, conversationId?) =>
     set((s) => ({
-      messagesByConversation: Object.fromEntries(
-        Object.entries(s.messagesByConversation).map(([cid, list]) => [
-          cid,
-          list.map((m) => (m.id === messageId ? { ...m, ...patch } : m)),
-        ]),
-      ),
+      messagesByConversation:
+        conversationId && s.messagesByConversation[conversationId]
+          ? {
+              ...s.messagesByConversation,
+              [conversationId]: s.messagesByConversation[conversationId].map((m) =>
+                m.id === messageId ? { ...m, ...patch } : m,
+              ),
+            }
+          : Object.fromEntries(
+              Object.entries(s.messagesByConversation).map(([cid, list]) => [
+                cid,
+                list.map((m) => (m.id === messageId ? { ...m, ...patch } : m)),
+              ]),
+            ),
     })),
 
-  removeMessage: (messageId) =>
+  removeMessage: (messageId, conversationId?) =>
     set((s) => ({
-      messagesByConversation: Object.fromEntries(
-        Object.entries(s.messagesByConversation).map(([cid, list]) => [
-          cid,
-          list.map((m) =>
-            m.id === messageId ? { ...m, deletedAt: new Date().toISOString(), content: "" } : m,
-          ),
-        ]),
-      ),
+      messagesByConversation:
+        conversationId && s.messagesByConversation[conversationId]
+          ? {
+              ...s.messagesByConversation,
+              [conversationId]: s.messagesByConversation[conversationId].map((m) =>
+                m.id === messageId
+                  ? { ...m, deletedAt: new Date().toISOString(), content: "" }
+                  : m,
+              ),
+            }
+          : Object.fromEntries(
+              Object.entries(s.messagesByConversation).map(([cid, list]) => [
+                cid,
+                list.map((m) =>
+                  m.id === messageId
+                    ? { ...m, deletedAt: new Date().toISOString(), content: "" }
+                    : m,
+                ),
+              ]),
+            ),
     })),
 
-  toggleReaction: (messageId, emoji, userId) =>
+  toggleReaction: (messageId, emoji, userId, conversationId?) =>
     set((s) => ({
-      messagesByConversation: Object.fromEntries(
-        Object.entries(s.messagesByConversation).map(([cid, list]) => [
-          cid,
-          list.map((m) => {
-            if (m.id !== messageId) return m;
-            // Defensive: reactions is contractually an array, but a malformed
-            // row must not crash the whole store update.
-            const reactions = m.reactions ?? [];
-            const existing = reactions.find((r) => r.emoji === emoji && r.userId === userId);
-            return {
-              ...m,
-              reactions: existing
-                ? reactions.filter((r) => r !== existing)
-                : [...reactions, { emoji, userId }],
-            };
-          }),
-        ]),
-      ),
+      messagesByConversation:
+        conversationId && s.messagesByConversation[conversationId]
+          ? applyToggle(s.messagesByConversation, conversationId, messageId, emoji, userId)
+          : Object.fromEntries(
+              Object.entries(s.messagesByConversation).map(([cid, list]) => [
+                cid,
+                applyToggleList(list, messageId, emoji, userId),
+              ]),
+            ),
     })),
 
   setTyping: (conversationId, userId, isTyping) =>

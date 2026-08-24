@@ -22,14 +22,24 @@ import type { EventEnvelope } from "@mqtt-chat/mqtt-contracts";
 
 export default function ChatPage() {
   const router = useRouter();
-  const store = useChatStore();
+  // PERF: subscribe to ONLY the slices this component renders. The old
+  // whole-store subscription re-rendered the entire 3-column shell (sidebar,
+  // list, composer, details) on every typing/presence/receipt/reaction event.
+  // Actions come from getState() — they are stable and never trigger renders.
+  const activeId = useChatStore((s) => s.activeConversationId);
+  const activeConversation = useChatStore((s) =>
+    s.conversations.find((c) => c.id === s.activeConversationId) ?? null,
+  );
+  const identityUserId = useChatStore((s) => s.identity?.userId);
+  const connectionState = useChatStore((s) => s.connectionState);
+  const users = useChatStore((s) => s.users);
   const bootstrapped = useRef(false);
   // Previous transport state — used to detect reconnect transitions
   // (reconnecting/disconnected → connected) and trigger state recovery.
   const prevConnectionState = useRef<ConnectionState | null>(null);
   // Reply target for the composer — canonical messageId of an existing message.
   const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
-  const activeConversationId = store.activeConversationId;
+  const activeConversationId = activeId;
 
   // Switching conversations must never carry a stale reply target over.
   useEffect(() => {
@@ -53,7 +63,7 @@ export default function ChatPage() {
     if (prev && (prev.userId !== identity.userId || prev.deviceId !== identity.deviceId)) {
       useChatStore.getState().resetTransient();
     }
-    store.setIdentity(identity);
+    useChatStore.getState().setIdentity(identity);
 
     const realtime = getRealtimeService();
     // Handlers live for the page lifetime and are NOT unregistered on effect
@@ -116,9 +126,6 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once
   }, [router]);
 
-  const activeId = store.activeConversationId;
-  const activeConversation = store.conversations.find((c) => c.id === activeId) ?? null;
-
   // Peer-relative DIRECT label: A sees B's name, B sees A's name.
   const activeTitle = (() => {
     if (!activeConversation) return "";
@@ -126,9 +133,9 @@ export default function ChatPage() {
       return activeConversation.title ?? "Group";
     }
     const peerId = activeConversation.members?.find(
-      (m) => m.userId !== store.identity?.userId,
+      (m) => m.userId !== identityUserId,
     )?.userId;
-    const peer = store.users.find((u) => u.id === peerId);
+    const peer = users.find((u) => u.id === peerId);
     return peer?.displayName ?? peerId ?? "Direct chat";
   })();
 
@@ -147,7 +154,7 @@ export default function ChatPage() {
                     : "Direct conversation"}
                 </p>
               </div>
-              <ConnectionBadge state={store.connectionState} />
+              <ConnectionBadge state={connectionState} />
             </header>
             <MessageList conversationId={activeConversation.id} onRequestReply={setReplyTo} />
             <Composer
@@ -294,10 +301,14 @@ function handleEvent(envelope: EventEnvelope): void {
       break;
     }
     case "message.edited":
-      s.updateMessage(String(data["messageId"]), {
-        content: String(data["content"]),
-        editedAt: envelope.timestamp,
-      });
+      s.updateMessage(
+        String(data["messageId"]),
+        {
+          content: String(data["content"]),
+          editedAt: envelope.timestamp,
+        },
+        conversationId || undefined,
+      );
       break;
     case "conversation.deleted": {
       // Tombstone event (#28): remove EVERY trace without reload; an open
@@ -312,7 +323,7 @@ function handleEvent(envelope: EventEnvelope): void {
       break;
     }
     case "message.deleted":
-      s.removeMessage(String(data["messageId"]));
+      s.removeMessage(String(data["messageId"]), conversationId || undefined);
       break;
     case "message.rejected": {
       // Authority rejected the send — fail the optimistic entry NOW instead
@@ -325,10 +336,20 @@ function handleEvent(envelope: EventEnvelope): void {
       break;
     }
     case "reaction.added":
-      s.toggleReaction(String(data["messageId"]), String(data["emoji"]), String(data["userId"]));
+      s.toggleReaction(
+        String(data["messageId"]),
+        String(data["emoji"]),
+        String(data["userId"]),
+        conversationId || undefined,
+      );
       break;
     case "reaction.removed":
-      s.toggleReaction(String(data["messageId"]), String(data["emoji"]), String(data["userId"]));
+      s.toggleReaction(
+        String(data["messageId"]),
+        String(data["emoji"]),
+        String(data["userId"]),
+        conversationId || undefined,
+      );
       break;
     case "receipt.read": {
       if (String(data["userId"]) === selfUserId) break;

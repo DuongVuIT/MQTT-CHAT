@@ -80,14 +80,12 @@ export class RealtimeService {
     await this.disconnect();
 
     this.identity = identity;
-    // Conversation lifecycle + receipts arrive on flat/user topics; message/
-    // reaction/typing/presence fan-out is covered by the core's events wildcard.
-    this.globalTopics = [
-      `${EVENT_TOPICS.conversationCreated}/#`,
-      `${EVENT_TOPICS.conversationUpdated}/#`,
-      `${EVENT_TOPICS.conversationMemberJoined}/#`,
-      `${EVENT_TOPICS.conversationMemberLeft}/#`,
-    ];
+    // PERF: NO extra lifecycle wildcards here. The core already subscribes
+    // the canonical all-events wildcard (chat/v1/events/#), which fans out
+    // conversation.* too — subscribing them AGAIN delivered every lifecycle
+    // event TWICE to handleEvent (double upserts/reconciliations on web).
+    // Receipts arrive via the user topic in subscribeGlobal.
+    this.globalTopics = [];
 
     const core = new ChatRealtimeClient({
       url: defaultMqttWsUrl(),

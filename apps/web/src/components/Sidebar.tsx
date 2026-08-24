@@ -13,8 +13,15 @@ import { useChatStore } from "@/store/chat-store";
 
 export function Sidebar() {
   const router = useRouter();
-  const { identity, users, conversations, presence, activeConversationId, setActiveConversation } =
-    useChatStore();
+  // PERF: slice subscriptions — the whole-store destructure re-rendered the
+  // sidebar on EVERY store mutation (typing, receipts, message arrays…).
+  // Actions are stable and never trigger renders.
+  const identity = useChatStore((s) => s.identity);
+  const users = useChatStore((s) => s.users);
+  const conversations = useChatStore((s) => s.conversations);
+  const presence = useChatStore((s) => s.presence);
+  const activeConversationId = useChatStore((s) => s.activeConversationId);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
   const [creating, setCreating] = useState(false);
   const [userFilter, setUserFilter] = useState("");
   // Identity is ALWAYS the runtime userId — display names are never identity.

@@ -247,16 +247,31 @@ export function useChatSession(identity: Identity | null) {
         case 'reaction.removed': {
           // Canonical reactions from ANY client (web included) land here in
           // realtime. Pure reducer — authoritative + QoS1-idempotent.
+          // PERF: scope to the event's conversation when it is present and
+          // cached; a no-op reducer result keeps the SAME references so
+          // nothing re-renders. Full sweep only as a fallback.
+          const targetCid =
+            typeof data['conversationId'] === 'string' ? data['conversationId'] : '';
           setMessagesByConv(prev => {
+            if (targetCid && prev[targetCid]) {
+              const next = applyReactionEvent(
+                prev[targetCid],
+                ev.eventType as 'reaction.added' | 'reaction.removed',
+                data,
+              );
+              return next === prev[targetCid] ? prev : { ...prev, [targetCid]: next };
+            }
             const out: typeof prev = {};
+            let same = true;
             for (const [cid, list] of Object.entries(prev)) {
               out[cid] = applyReactionEvent(
                 list,
                 ev.eventType as 'reaction.added' | 'reaction.removed',
                 data,
               );
+              if (out[cid] !== list) same = false;
             }
-            return out;
+            return same ? prev : out;
           });
           break;
         }
