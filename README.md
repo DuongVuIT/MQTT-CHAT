@@ -35,6 +35,16 @@ Then open **only**:
 
 You never need to open any other port.
 
+## Acceptance probes (dev stack + Chrome required)
+
+```bash
+pnpm probe:scroll   # §72: 300-message conversation — open-at-latest (0px),
+                    # EXACT prepend-anchor preservation, unread-pill jump,
+                    # rapid sends, switch-and-return
+pnpm probe:leak     # §73: churn conversations/identity/reconnects, then the
+                    # broker must see ONE stable-subscription client per session
+```
+
 ## Public Surface (the only browser-facing routes)
 
 | Route          | Serves                                                       |

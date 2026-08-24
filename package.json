@@ -28,6 +28,8 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yml,yaml,mjs,mts,cts}\"",
     "validate": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:mobile && pnpm build",
     "test:browser": "node scripts/web-browser-e2e.mjs",
+    "probe:scroll": "node scripts/scroll-acceptance.mjs",
+    "probe:leak": "node scripts/mqtt-leak-probe.mjs",
     "verify:all": "pnpm validate && pnpm test:e2e && pnpm test:browser",
     "verify:completion": "node scripts/check-project-status.mjs",
     "docker:up": "docker compose up -d",
