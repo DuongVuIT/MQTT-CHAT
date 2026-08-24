@@ -76,4 +76,65 @@ export const api = {
     }>(`/presence?userIds=${encodeURIComponent(userIds.join(','))}`).then(
       r => r.presence,
     ),
+  /** Create a DIRECT (exactly 2 distinct ids) or GROUP conversation. */
+  createConversation: (body: {
+    type: 'DIRECT' | 'GROUP';
+    title?: string;
+    createdBy: string;
+    memberIds: string[];
+  }) =>
+    request<{ conversation: ApiConversation }>('/conversations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }).then(r => r.conversation),
+  /** Add members to a group — canonical member-joined reconciles clients. */
+  addMembers: (conversationId: string, userIds: string[]) =>
+    request<{ added: number }>(
+      `/conversations/${encodeURIComponent(conversationId)}/members`,
+      { method: 'POST', body: JSON.stringify({ userIds }) },
+    ),
+  /** Remove a member (canonical member-left reconciles clients). */
+  removeMember: (conversationId: string, userId: string) =>
+    request<{ removed: boolean }>(
+      `/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+    ),
+  /**
+   * Same-origin multipart upload → durable storageKey. Binary NEVER goes
+   * through MQTT; the message carries only storage identity metadata.
+   */
+  uploadFile: async (
+    file: { uri: string; name: string; type: string },
+    conversationId: string,
+  ): Promise<{
+    key: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+  }> => {
+    const form = new FormData();
+    form.append('conversationId', conversationId);
+    // RN's FormData type accepts the {uri,name,type} asset part directly.
+    form.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.type,
+    });
+    // Two type systems describe FormData (RN vs fetch's BodyInit) — bridge
+    // at this single boundary; the runtime accepts the RN asset part.
+    const init = { method: 'POST', body: form } as unknown as RequestInit;
+    const res = await fetch(`${API_BASE}/uploads`, init);
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        error?: { message?: string };
+      } | null;
+      throw new Error(body?.error?.message ?? `Upload failed (${res.status})`);
+    }
+    return (await res.json()) as {
+      key: string;
+      filename: string;
+      mimeType: string;
+      size: number;
+    };
+  },
 };

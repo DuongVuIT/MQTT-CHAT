@@ -30,6 +30,15 @@ const rawEventPayload = {
   createdAt: '2026-08-24T00:00:00.000Z',
 };
 
+const noopActions = {
+  send: () => {},
+  edit: () => {},
+  delete: () => {},
+  react: () => {},
+  pickImage: () => {},
+  pickDocument: () => {},
+};
+
 function render(messages: ApiMessage[]): TestRenderer.ReactTestRenderer {
   let tree!: TestRenderer.ReactTestRenderer;
   act(() => {
@@ -40,10 +49,13 @@ function render(messages: ApiMessage[]): TestRenderer.ReactTestRenderer {
         pending={[]}
         typingUsers={[]}
         identityUserId="user-me"
+        isGroup={false}
+        actions={noopActions}
         onSend={() => {}}
         onRetry={() => {}}
         onBack={() => {}}
         onTypingChange={() => {}}
+        onOpenDetails={() => {}}
       />,
     );
   });

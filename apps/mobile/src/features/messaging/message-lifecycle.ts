@@ -15,6 +15,10 @@ export interface PendingMessage {
   content: string;
   replyToId: string | null;
   status: PendingStatus;
+  /** Canonical message type (TEXT/IMAGE/FILE/…). Defaults to TEXT. */
+  type?: string;
+  /** Durable media metadata (storageKey/filename/mime/size) — never binary. */
+  metadata?: unknown;
 }
 
 export class MessageLifecycleStore {

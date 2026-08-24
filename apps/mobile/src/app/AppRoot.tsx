@@ -1,24 +1,37 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { launchImageLibrary, type Asset } from 'react-native-image-picker';
+import { pick, types as docTypes } from '@react-native-documents/picker';
 import { api } from '../lib/api';
 import { useChatSession, type Identity } from '../hooks/useChatSession';
 import { IdentityPickerScreen } from '../screens/IdentityPickerScreen';
 import { ConversationListScreen } from '../screens/ConversationListScreen';
 import { ChatScreen } from '../screens/ChatScreen';
+import { NewConversationScreen } from '../screens/NewConversationScreen';
+import { GroupDetailsScreen } from '../screens/GroupDetailsScreen';
 
 type Route =
   | { screen: 'picker' }
   | { screen: 'list' }
+  | { screen: 'new' }
+  | { screen: 'details'; conversationId: string }
   | {
       screen: 'chat';
       conversationId: string;
       title: string;
       subtitle: string | null;
+      isGroup: boolean;
     };
 
 /** Peer-relative display title: A sees B's name and vice versa. */
 function conversationTitle(
-  conv: ReturnType<typeof useChatSession>['conversations'][number] | undefined,
+  conv:
+    | {
+        type: 'DIRECT' | 'GROUP';
+        title: string | null;
+        members: Array<{ userId: string }>;
+      }
+    | undefined,
   users: Awaited<ReturnType<typeof api.listUsers>>,
   identityUserId: string | null,
 ): string {
@@ -30,6 +43,15 @@ function conversationTitle(
   );
 }
 
+/** Allowed upload content types (mirrors the API allowlist). */
+const ALLOWED_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+];
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
 export function AppRoot() {
   const [users, setUsers] = useState<Awaited<ReturnType<typeof api.listUsers>>>(
     [],
@@ -38,7 +60,10 @@ export function AppRoot() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [route, setRoute] = useState<Route>({ screen: 'picker' });
+  const [uploading, setUploading] = useState(false);
   const session = useChatSession(identity);
+  const routeRef = useRef(route);
+  routeRef.current = route;
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +83,8 @@ export function AppRoot() {
     };
   }, []);
 
+  const identityUser = users.find(u => u.id === identity?.userId) ?? null;
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -73,7 +100,7 @@ export function AppRoot() {
     );
   }
 
-  if (route.screen === 'picker') {
+  if (route.screen === 'picker' || !identity) {
     return (
       <IdentityPickerScreen
         users={users}
@@ -88,6 +115,144 @@ export function AppRoot() {
     );
   }
 
+  // ---- Attachment flows (binary via REST upload; MQTT carries metadata) ---
+  const activeConversationId =
+    route.screen === 'chat' || route.screen === 'details'
+      ? route.conversationId
+      : null;
+
+  const handlePickedFile = async (
+    file: { uri: string; name: string; type: string; size: number },
+    kind: 'IMAGE' | 'FILE',
+  ): Promise<void> => {
+    const conversationId = activeConversationId;
+    if (!conversationId || !identity) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      Alert.alert('File too large', 'Maximum upload size is 50 MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const uploaded = await api.uploadFile(
+        { uri: file.uri, name: file.name, type: file.type },
+        conversationId,
+      );
+      // Optimistic media message through the SAME lifecycle (clientMessageId
+      // first; canonical event reconciles it).
+      await session.sendMediaMessage({
+        conversationId,
+        clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        type: kind,
+        content: '',
+        replyToId: null,
+        metadata: {
+          storageKey: uploaded.key,
+          filename: uploaded.filename,
+          mimeType: uploaded.mimeType,
+          size: uploaded.size,
+        },
+        pendingContent: `📎 ${uploaded.filename}`,
+      });
+    } catch (e) {
+      Alert.alert(
+        'Upload failed',
+        e instanceof Error ? e.message : 'Unknown error',
+        [{ text: 'OK' }],
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pickImage = (): void => {
+    void launchImageLibrary({ mediaType: 'photo', quality: 0.8 }).then(
+      result => {
+        const asset: Asset | undefined = result.assets?.[0];
+        if (!asset?.uri) return; // user cancelled
+        const type = asset.type ?? 'image/jpeg';
+        if (!ALLOWED_IMAGE_TYPES.includes(type)) {
+          Alert.alert('Unsupported image', `Type ${type} is not allowed.`);
+          return;
+        }
+        void handlePickedFile(
+          {
+            uri: asset.uri,
+            name: asset.fileName ?? `photo-${Date.now()}.jpg`,
+            type,
+            size: asset.fileSize ?? 0,
+          },
+          'IMAGE',
+        );
+      },
+    );
+  };
+
+  const pickDocument = (): void => {
+    void pick({ type: [docTypes.pdf] })
+      .then(results => {
+        const doc = results[0];
+        if (!doc?.uri) return;
+        void handlePickedFile(
+          {
+            uri: doc.uri,
+            name: doc.name ?? `document-${Date.now()}.pdf`,
+            type: doc.type ?? 'application/pdf',
+            size: doc.size ?? 0,
+          },
+          'FILE',
+        );
+      })
+      .catch(() => {
+        /* user cancelled — not an error */
+      });
+  };
+
+  if (route.screen === 'new') {
+    return (
+      <NewConversationScreen
+        users={users}
+        identityUserId={identity.userId}
+        onBack={() => setRoute({ screen: 'list' })}
+        onCreated={conversation => {
+          // Optimistic upsert; the canonical conversation.created event also
+          // arrives and collapses into the SAME entity (id upsert).
+          session.upsertLocalConversation(conversation);
+          setRoute({
+            screen: 'chat',
+            conversationId: conversation.id,
+            title: conversationTitle(conversation, users, identity.userId),
+            subtitle:
+              conversation.type === 'GROUP'
+                ? `${conversation.members.length} members`
+                : null,
+            isGroup: conversation.type === 'GROUP',
+          });
+        }}
+      />
+    );
+  }
+
+  if (route.screen === 'details') {
+    const conversation = session.conversations.find(
+      c => c.id === route.conversationId,
+    );
+    if (!conversation) {
+      setRoute({ screen: 'list' });
+      return null;
+    }
+    return (
+      <GroupDetailsScreen
+        conversation={conversation}
+        users={users}
+        identityUserId={identity.userId}
+        onBack={() => setRoute({ screen: 'list' })}
+        onChanged={() => {
+          void session.refreshConversations();
+        }}
+      />
+    );
+  }
+
   if (route.screen === 'list') {
     return (
       <ConversationListScreen
@@ -95,43 +260,103 @@ export function AppRoot() {
         presence={session.presence}
         status={session.status}
         users={users}
-        identityUserId={identity?.userId ?? null}
+        identityUserId={identity.userId}
+        identityDisplayName={identityUser?.displayName ?? identity.userId}
         onOpen={conversationId => {
           const conv = session.conversations.find(c => c.id === conversationId);
           void session.openConversation(conversationId);
           setRoute({
             screen: 'chat',
             conversationId,
-            title: conversationTitle(conv, users, identity?.userId ?? null),
+            title: conversationTitle(conv, users, identity.userId),
             subtitle:
               conv && conv.type === 'GROUP'
                 ? `${conv.members?.length ?? 0} members`
                 : null,
+            isGroup: conv?.type === 'GROUP',
           });
+        }}
+        onNew={() => setRoute({ screen: 'new' })}
+        // Profile switch: identity state change tears the whole session down
+        // (useChatSession cleanup) and starts a fresh one on pick — §42.
+        onProfile={() => {
+          Alert.alert(
+            identityUser?.displayName ?? identity.userId,
+            identity.userId,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Switch profile',
+                style: 'default',
+                onPress: () => {
+                  setIdentity(null);
+                  setRoute({ screen: 'picker' });
+                },
+              },
+            ],
+          );
         }}
       />
     );
   }
 
+  const activeConv = session.conversations.find(
+    c => c.id === route.conversationId,
+  );
+  void activeConv; // details screen re-reads from the session on open
+
   return (
-    <ChatScreen
-      title={route.title}
-      subtitle={route.subtitle ?? undefined}
-      messages={session.messagesByConv[route.conversationId] ?? []}
-      pending={session.pendingListFor(route.conversationId)}
-      typingUsers={session.typingByConv[route.conversationId] ?? []}
-      identityUserId={identity?.userId ?? null}
-      onSend={content => {
-        void session.sendMessage(route.conversationId, content);
-      }}
-      onRetry={cmid => {
-        void session.retryMessage(cmid);
-      }}
-      onBack={() => setRoute({ screen: 'list' })}
-      onTypingChange={isTyping =>
-        session.sendTyping(route.conversationId, isTyping)
-      }
-    />
+    <View style={{ flex: 1 }}>
+      <ChatScreen
+        title={route.title}
+        subtitle={route.subtitle ?? undefined}
+        messages={session.messagesByConv[route.conversationId] ?? []}
+        pending={session.pendingListFor(route.conversationId)}
+        typingUsers={session.typingByConv[route.conversationId] ?? []}
+        identityUserId={identity.userId}
+        isGroup={route.isGroup}
+        actions={{
+          send: (content, replyToId) => {
+            void session.sendMessage(route.conversationId, content, replyToId);
+          },
+          edit: (messageId, content) => {
+            void session.editMessage(route.conversationId, messageId, content);
+          },
+          delete: messageId => {
+            void session.deleteMessage(route.conversationId, messageId);
+          },
+          react: (messageId, emoji, remove) => {
+            session.toggleReaction(
+              route.conversationId,
+              messageId,
+              emoji,
+              remove,
+            );
+          },
+          pickImage,
+          pickDocument,
+        }}
+        onSend={(content, replyToId) => {
+          void session.sendMessage(route.conversationId, content, replyToId);
+        }}
+        onRetry={cmid => {
+          void session.retryMessage(cmid);
+        }}
+        onBack={() => setRoute({ screen: 'list' })}
+        onTypingChange={isTyping =>
+          session.sendTyping(route.conversationId, isTyping)
+        }
+        onOpenDetails={() =>
+          setRoute({ screen: 'details', conversationId: route.conversationId })
+        }
+      />
+      {uploading && (
+        <View style={styles.uploadOverlay}>
+          <ActivityIndicator color="#818cf8" />
+          <Text style={styles.uploadText}>Uploading…</Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -142,4 +367,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#0f172a',
   },
+  uploadOverlay: {
+    position: 'absolute',
+    bottom: 90,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  uploadText: { color: '#cbd5e1', fontSize: 13 },
 });
