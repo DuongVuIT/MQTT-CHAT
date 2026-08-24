@@ -1,9 +1,0 @@
-{
-  "extends": "../../tooling/typescript/nextjs.json",
-  "include": ["*.mjs", "*.ts", "next-env.d.ts", "src", ".next/types/**/*.ts"],
-  "compilerOptions": {
-    "paths": {
-      "@/*": ["./src/*"]
-    }
-  }
-}

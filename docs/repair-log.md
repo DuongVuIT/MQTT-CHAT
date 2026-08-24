@@ -410,3 +410,166 @@ web runtime     ✓ (Next 16, browser render, no console errors)
   retryMessage via lifecycle store).
 - Web `publishCommand` uses callback-less mqtt.js `publish` (packets buffer
   while offline and drain on reconnect — no promise rejection path).
+
+# Bug #17 — Admin dashboard crashed: `mqtt.connect is not a function`
+
+- **Symptom**: Opening the admin dashboard threw `mqtt.connect is not a
+function` at runtime from `admin-api.ts`; the live event stream never came up.
+- **Root cause**: `mqtt@5.15.2`'s browser ESM bundle (`dist/mqtt.esm.js`,
+  selected via the package `exports` map's `browser → import` condition) has
+  ONLY a default export — there is no named `connect`. The admin code used
+  `import("mqtt").then((mqtt) => mqtt.connect(...))`, so at runtime the module
+  namespace object had no `.connect`. (The web app worked because it used a
+  default import, whose binding IS the full module object.)
+- **Fix** (structural, not a cast): admin no longer imports `mqtt` at all.
+  `packages/realtime-core` is the single browser MQTT adapter; admin's
+  `connectEventStream` now constructs an observer-mode `ChatRealtimeClient`
+  (identity `admin-dashboard:<random>`, `subscribeUserEvents: false`) and the
+  core client uses a static default import internally.
+- **Rule enforced**: UI layers must never `import "mqtt"` (checked in review;
+  realtime-core is the only allowed importer on the client side).
+
+# Bug #18 — No single public origin (ports sprawl)
+
+- **Symptom**: Developers/users had to know five ports (:3000 web,
+  :3001 API, :3002 admin, :8083 MQTT WS, :9000 MinIO); browser code hardcoded
+  cross-origin service URLs; presigned upload URLs leaked the MinIO host into
+  the browser.
+- **Root cause**: Each service was exposed directly; no reverse proxy layer;
+  media used presigned-PUT/302 flows that embed object-storage origins.
+- **Fix**:
+  - New `apps/gateway` (Node + http-proxy): public origin :3000 routes
+    `/api/*`→API, `/media*`→API (`/api/media` streaming handler), everything
+    else→web (:3100 internal), WS upgrade `/mqtt`→EMQX (:8083 internal),
+    other upgrades (Next HMR)→web. Host headers preserved end-to-end.
+  - API: Nest global prefix `/api` (root `/` excluded as a service probe);
+    health reports real DB+Redis state.
+  - Media: multipart POST `/api/uploads` streams through the API server-side
+    (presign/complete/view endpoints removed); GET `/api/media?key=` streams
+    objects with correct Content-Type; metadata persists only `storageKey`.
+  - Web: relative same-origin bases (`/api`, `/media?key=`, `ws(s)://host/mqtt`);
+    dev port moved to :3100; admin merged INTO the web app at `/admin`
+    (apps/admin deleted).
+  - Mobile: config derives one PUBLIC_HOST (`localhost` iOS sim /
+    `10.0.2.2` Android emulator / env override) → `http://host:3000/api`,
+    `ws://host:3000/mqtt`, `/media`.
+- **Verified**: HTTP 200 for `/`, `/chat`, `/admin` via gateway; `/api/health`
+  JSON; WS upgrade 101 with EMQX `server: Cowboy` header; full MQTT
+  publish/receive round-trip over `ws://localhost:3000/mqtt`; PNG byte-perfect
+  round-trip through `/api/uploads` + `/api/media`.
+
+# Bug #19 — Identity switch left stale sender perspective
+
+- **Symptom**: After switching users, event handling still compared messages
+  against the PREVIOUS identity captured in a closure bound to the singleton
+  realtime service — wrong message ownership/perspective until reload.
+- **Root cause**: `handleEvent(envelope, identity.userId)` captured the
+  bootstrap-time userId forever; switching only replaced localStorage.
+- **Fix**: handlers read the active identity from the store AT EVENT TIME;
+  `connect()` tears down any existing session before creating a new one for a
+  different identity; `resetTransient()` drops all identity-scoped state
+  (conversations/pending/typing/presence) when the stored identity changes.
+  Regression-tested (chat-store suite).
+
+# Bug #20 — E2E runs polluted development data
+
+- **Symptom**: Every `pnpm test:e2e` run left `e2e-*` users, `e2e-group-*`
+  conversations and smoke/bot messages inside the developer database and
+  visible in real UIs (identity picker, sidebar).
+- **Root cause**: suites ran against the dev stack/database directly with no
+  isolation or cleanup.
+- **Fix**:
+  - Isolated E2E stack (`scripts/test-stack.mjs`, wired as `pnpm test:e2e`):
+    dedicated database `mqtt_chat_test` (migrated+seeded per run), Redis db 1,
+    API on :3011, own workers, MQTT topic namespace fence
+    (`MQTT_TOPIC_NAMESPACE=chat/v1-e2e`, honored by contracts so test traffic
+    is invisible to canonical clients by construction). Readiness-gated:
+    suites start only after workers are subscribed.
+  - Fixture lifecycle `scripts/lib/chat-fixture.mjs`: runtime ids, exact-ID
+    cleanup in `finally`; API gained teardown endpoints
+    (`DELETE /users/:id` refuses while messages exist, `DELETE
+/conversations/:id` cascades).
+  - One-time audited cleanup of the dev DB (`scripts/cleanup-dev-data.mjs`,
+    dry-run by default): deleted exactly 10 test conversations, 8 test users,
+    108 script-authored messages; seeded demo data untouched.
+
+# Bug #21 — Web production build failed under ambient NODE_ENV=development
+
+- **Symptom**: `next build` prerender crashed (`Cannot read properties of null
+(reading 'useContext')` inside Next's LayoutRouter) even though the app was
+  fine in dev and had built successfully previously.
+- **Root cause**: the shell environment exported `NODE_ENV=development`;
+  Next's production prerender then ran development React inside the build
+  worker. Version pinning experiments were red herrings — HEAD failed
+  identically.
+- **Fix**: `apps/web` build script forces `NODE_ENV=production next build`,
+  making builds deterministic regardless of the caller's shell. Verified:
+  full monorepo build PASS with the variable present.
+
+# Bug #22 — Mobile crash: `Cannot read property 'length' of undefined` (reactions)
+
+- **Symptom**: Opening a conversation on React Native crashed ChatScreen with
+  `Cannot read property 'length' of undefined` at `item.reactions.length`.
+- **Root cause** (contract drift, not a rendering typo): the canonical
+  `message.created` event NEVER carried `reactions` — the worker serializer
+  (`toMessageEventData`) omitted the field and the contract schema didn't
+  declare it. Web survived only because its event handler hardcoded
+  `reactions: []` while building the UI model; mobile blind-cast the raw
+  event payload (`data as unknown as ApiMessage`) straight into the FlatList.
+- **Fix** (in dependency order):
+  1. Contract: `messageEventDataSchema` gains `reactions` — optional on the
+     wire (legacy outbox rows), REQUIRED after parse (`.default([])`).
+  2. Producer: chat-worker `toMessageEventData` always emits `reactions`
+     (fresh creates → `[]`); the bot-send path shares the same serializer.
+  3. ONE boundary normalizer: `normalizeMessage()` in
+     `@mqtt-chat/realtime-core` — shared by web and mobile — guarantees every
+     UI message invariant (reactions array, null-safe reply/edited/deleted,
+     senderName ← senderId fallback, safe type/senderType enums). Web's
+     `handleEvent` and mobile's `useChatSession` now consume it; raw casts to
+     the UI model are gone.
+  4. Defensive render: ChatScreen derives `reactions = item.reactions ?? []`
+     and logs a dev-only contract-drift warning; a malformed row can no
+     longer crash the FlatList. Same-class sweep guarded store toggleReaction,
+     mobile members accesses.
+- **Regression tests**: vitest `normalize-message.test.ts` (8 cases: missing
+  reactions → [], preserved, malformed entries filtered, legacy minimal row,
+  metadata, timestamps, non-object input, bot path); mobile jest render test
+  (react-test-renderer): message WITHOUT reactions field renders — no crash
+  (10/10); web store: toggleReaction on malformed row restores the invariant,
+  history+realtime merge keeps ONE canonical message.
+- **Executed verification**: live MQTT probe — fresh `message.created` carries
+  `reactions: []`; HTTP history 50/50 rows valid; web browser E2E 17/17 PASS;
+  mobile typecheck + lint + jest green; iOS Simulator relaunch, no RedBox.
+
+# Bug #23 — Group created on Web never appeared on Mobile (until reload); send in a fresh group stuck "Sending…"
+
+- **Symptom**: A group created on Web did not show up on the Mobile
+  conversation list until the app was restarted; opening the newly created
+  group and sending could leave the bubble in an unresolved sending state.
+- **Root cause** (traced end-to-end with a transport-level reproduction using
+  the EXACT shared client): the broker DELIVERED `conversation.created` to the
+  mobile client (all-events wildcard) — but the mobile event handler had **no
+  case for any conversation lifecycle event**, so the payload was dropped on
+  the floor. Discovery therefore depended on the bootstrap REST refetch
+  (i.e. an app restart). The send path itself acks correctly (worker emitted
+  the canonical `message.created` with `sequence=1` for a fresh group); the
+  perceived stuck state came from the missing discovery UX plus the legacy
+  bundle lacking the bounded queued/sending lifecycle rendering.
+- **Fix**:
+  1. `features/conversations/conversation-events.ts` — pure reducers
+     (`applyConversationEvent`, `applyMessageActivity`, `sortByActivity`)
+     implementing discovery, membership updates, monotonic summary updates
+     and activity ordering.
+  2. `useChatSession` handles conversation.created / updated /
+     member-joined / member-left and reflects every new message onto the
+     list in realtime — no reload, no refetch timers.
+  3. Shared `normalizeConversation` + `upsertConversationInto` in
+     realtime-core (ONE normalization path for web and mobile; members always
+     an array; duplicates collapse to ONE entity).
+- **Regression test (permanent)**: `scripts/web-mobile-discovery-e2e.mts` in
+  the isolated E2E stack — dynamic runtime users, Web creates a group
+  including the mobile identity, the mobile side (shared client + the REAL
+  app reducer) must see it WITHOUT reload, open it, immediately send, reach a
+  canonical ack within a bounded timeout, with EXACTLY ONE DB message.
+  Plus 9 jest reducer cases (discovery, dedupe, member-left self/other,
+  monotonic summary). Result: 7/7 isolated suites PASS.
