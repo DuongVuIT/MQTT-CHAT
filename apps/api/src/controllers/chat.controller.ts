@@ -498,6 +498,16 @@ export class ChatController {
     if (!conversation || conversation.deletedAt) {
       throw new NotFoundException(apiError("CONVERSATION_NOT_FOUND", "Conversation not found"));
     }
+    // Type validity precedes permissions (mirror #34): a DIRECT conversation
+    // IS its immutable pair — nobody joins it later, so nobody can be removed
+    // either. Letting a pair-member "leave" would strand the pair-keyed row
+    // forever: reuse would return a broken 1-member DM and the add-guard (400)
+    // blocks any repair.
+    if (conversation.type !== "GROUP") {
+      throw new BadRequestException(
+        apiError("BAD_REQUEST", "Members cannot leave or be removed from DIRECT conversations"),
+      );
+    }
     const actor = conversation.members.find((m) => m.userId === actorUserId);
     if (!actor) {
       throw new ForbiddenException(apiError("FORBIDDEN", "Not a member of this group"));
@@ -511,8 +521,44 @@ export class ChatController {
     if (!target) {
       return { removed: false, absent: true };
     }
+    // The LAST member cannot leave: the member-left contract requires a
+    // non-empty group (memberCount ≥ 1), so letting them through would hit
+    // ZodError inside the transaction → rollback → deterministic 500 loop.
+    // Ending a group is the DELETE (tombstone) flow's job.
+    if (conversation.members.length === 1) {
+      throw new BadRequestException(
+        apiError("BAD_REQUEST", "The last member cannot leave — delete the conversation instead"),
+      );
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.conversationMember.deleteMany({ where: { conversationId: id, userId } });
+      // Sole-admin protection (#189): removing the ONLY admin must not leave
+      // an all-MEMBER group behind — every management op is ADMIN-gated, so
+      // such a group is orphaned forever. The oldest remaining HUMAN member
+      // is promoted in the SAME transaction; bots never inherit authority.
+      // The member-left event below carries the post-change roles.
+      const admins = conversation.members.filter((m) => m.role === "ADMIN");
+      const targetMember = conversation.members.find((m) => m.userId === userId);
+      if (targetMember?.role === "ADMIN" && admins.length === 1) {
+        const remaining = await tx.conversationMember.findMany({
+          where: { conversationId: id },
+          orderBy: { joinedAt: "asc" },
+          select: { userId: true },
+        });
+        const successor = remaining.find((m) => !m.userId.startsWith("system-bot"));
+        if (!successor) {
+          throw new BadRequestException(
+            apiError(
+              "BAD_REQUEST",
+              "Cannot remove the only admin — no other human member to promote",
+            ),
+          );
+        }
+        await tx.conversationMember.update({
+          where: { conversationId_userId: { conversationId: id, userId: successor.userId } },
+          data: { role: "ADMIN" },
+        });
+      }
       await this.emitConversationMembersChanged(tx, {
         conversationId: id,
         actorUserId,

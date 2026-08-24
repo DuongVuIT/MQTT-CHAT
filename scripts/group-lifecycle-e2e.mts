@@ -172,6 +172,58 @@ async function main() {
   );
   check(directGrow.status === 400, "member-ADD into DIRECT pair → 400", String(directGrow.status));
 
+  // ---- 3c. REMOVE boundary validation -------------------------------------
+  // A DIRECT conversation IS its immutable pair — self-leave must be a 400,
+  // never a membership-broken DM stranded behind its pair key.
+  const directLeave = await fetch(
+    `${API}/conversations/${direct.id}/members/${encodeURIComponent(A)}?actor=${encodeURIComponent(A)}`,
+    { method: "DELETE" },
+  );
+  check(
+    directLeave.status === 400,
+    "member-REMOVE from DIRECT pair → 400",
+    String(directLeave.status),
+  );
+
+  // The LAST member cannot leave: member-left requires a non-empty group, so
+  // letting it through would rollback + deterministic-500 forever. (A 1-member
+  // group arises by REMOVALS — create enforces ≥2 initial memberIds.)
+  const soloRes = await fetch(`${API}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "GROUP", title: `solo-${run}`, createdBy: A, memberIds: [A, C] }),
+  });
+  const solo = (await soloRes.json()).conversation;
+  const drainC = await fetch(
+    `${API}/conversations/${solo.id}/members/${encodeURIComponent(C)}?actor=${encodeURIComponent(A)}`,
+    { method: "DELETE" },
+  );
+  check(drainC.ok, "admin drains group to themselves", String(drainC.status));
+  const lastLeave = await fetch(
+    `${API}/conversations/${solo.id}/members/${encodeURIComponent(A)}?actor=${encodeURIComponent(A)}`,
+    { method: "DELETE" },
+  );
+  check(lastLeave.status === 400, "last-member leave → 400", String(lastLeave.status));
+
+  // Sole-admin protection: when the ONLY admin leaves, the oldest remaining
+  // human member is promoted in the same transaction — no orphaned group.
+  const xferRes = await fetch(`${API}/conversations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "GROUP", title: `xfer-${run}`, createdBy: A, memberIds: [A, B] }),
+  });
+  const xfer = (await xferRes.json()).conversation;
+  const adminLeave = await fetch(
+    `${API}/conversations/${xfer.id}/members/${encodeURIComponent(A)}?actor=${encodeURIComponent(A)}`,
+    { method: "DELETE" },
+  );
+  check(adminLeave.ok, "sole-admin self-leave succeeds", String(adminLeave.status));
+  const xferDetail = (await fetch(`${API}/conversations/${xfer.id}`).then((r) => r.json())) as {
+    conversation?: { members?: Array<{ userId: string; role: string }> };
+  };
+  const bRole = xferDetail.conversation?.members?.find((m) => m.userId === B)?.role;
+  check(bRole === "ADMIN", "oldest remaining member promoted to ADMIN", String(bRole));
+
   // ---- 4. Owner deletes → canonical tombstone everywhere ------------------
   const deleteRes = await fetch(`${API}/conversations/${conv.id}?actor=${encodeURIComponent(A)}`, {
     method: "DELETE",
