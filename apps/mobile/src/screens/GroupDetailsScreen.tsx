@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -10,13 +11,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { api, type ApiConversation, type ApiUser } from '../lib/api';
 
 /**
  * Group details (mobile): member list with presence, add-member (searchable
- * non-members), remove-member. All mutations go through the API — the
- * canonical member-joined / member-left events reconcile every client with
- * no reload. Identity is always the runtime userId.
+ * non-members), remove-member, and the group lifecycle ender — Delete Group
+ * behind a destructive confirmation sheet (#12/#14). All mutations go through
+ * the API — canonical member-joined/left/deleted events reconcile every
+ * client with no reload. Identity is always the runtime userId.
  */
 export function GroupDetailsScreen({
   conversation,
@@ -24,17 +27,26 @@ export function GroupDetailsScreen({
   identityUserId,
   onBack,
   onChanged,
+  onDeleted,
 }: {
   conversation: ApiConversation;
   users: ApiUser[];
   identityUserId: string | null;
   onBack: () => void;
   onChanged: () => void;
+  /** Called after the group was deleted server-side — navigate home safely. */
+  onDeleted: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isAdmin =
+    identityUserId !== null &&
+    (conversation.members ?? []).some(
+      m => m.userId === identityUserId && m.role === 'ADMIN',
+    );
 
   const members = conversation.members ?? [];
   const memberIds = useMemo(
@@ -57,7 +69,7 @@ export function GroupDetailsScreen({
     if (busy) return;
     setBusy(true);
     try {
-      await api.addMembers(conversation.id, [userId]);
+      await api.addMembers(conversation.id, [userId], identityUserId ?? '');
       setAdding(false);
       setFilter('');
       onChanged(); // canonical event usually lands first; refetch is a safety net
@@ -85,7 +97,11 @@ export function GroupDetailsScreen({
             void (async () => {
               setBusy(true);
               try {
-                await api.removeMember(conversation.id, userId);
+                await api.removeMember(
+                  conversation.id,
+                  userId,
+                  identityUserId ?? '',
+                );
                 onChanged();
               } catch (e) {
                 Alert.alert(
@@ -102,22 +118,40 @@ export function GroupDetailsScreen({
     );
   };
 
+  /** Lifecycle ender (#12): tombstone the group; canonical event reconciles. */
+  const deleteGroup = async (): Promise<void> => {
+    if (busy || identityUserId === null) return;
+    setBusy(true);
+    setConfirmDelete(false);
+    try {
+      await api.deleteConversation(conversation.id, identityUserId);
+      onDeleted(); // navigate home — conversation.deleted event cleans state
+    } catch (e) {
+      Alert.alert(
+        'Delete failed',
+        e instanceof Error ? e.message : 'Unknown error',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={onBack} hitSlop={8}>
-          <Text style={styles.back}>‹ Back</Text>
-        </Pressable>
-        <View style={styles.headerText}>
-          <Text style={styles.title} numberOfLines={1}>
-            {conversation.title ?? 'Group'}
-          </Text>
-          <Text style={styles.subtitle}>{members.length} members</Text>
-        </View>
-        <Pressable onPress={() => setAdding(v => !v)} hitSlop={8}>
-          <Text style={styles.add}>+ Add</Text>
-        </Pressable>
-      </View>
+      <ScreenHeader
+        title={conversation.title ?? 'Group'}
+        subtitle={`${members.length} members`}
+        onBack={onBack}
+        right={
+          <Pressable
+            onPress={() => setAdding(v => !v)}
+            hitSlop={8}
+            accessibilityLabel="Add member"
+          >
+            <Text style={styles.add}>+ Add</Text>
+          </Pressable>
+        }
+      />
 
       {adding && (
         <View style={styles.addPanel}>
@@ -157,6 +191,22 @@ export function GroupDetailsScreen({
         data={members}
         keyExtractor={m => m.userId}
         contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        ListFooterComponent={
+          isAdmin ? (
+            <View style={styles.dangerZone}>
+              <Text style={styles.dangerTitle}>DANGER ZONE</Text>
+              <Pressable
+                style={styles.deleteButton}
+                disabled={busy}
+                onPress={() => setConfirmDelete(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Delete group"
+              >
+                <Text style={styles.deleteButtonText}>Delete Group</Text>
+              </Pressable>
+            </View>
+          ) : undefined
+        }
         renderItem={({ item }) => {
           const user = users.find(u => u.id === item.userId);
           const isSelf = item.userId === identityUserId;
@@ -196,6 +246,48 @@ export function GroupDetailsScreen({
           <ActivityIndicator color="#818cf8" />
         </View>
       )}
+
+      {/* Destructive confirmation (#14) — never a single-tap delete. */}
+      <Modal
+        visible={confirmDelete}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmDelete(false)}
+      >
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setConfirmDelete(false)}
+        >
+          <Pressable style={styles.sheet} onPress={() => undefined}>
+            <Text style={styles.sheetTitle}>
+              Delete "{conversation.title ?? 'Group'}"?
+            </Text>
+            <Text style={styles.sheetBody}>
+              This group will be removed for all members.
+            </Text>
+            <View style={styles.sheetActions}>
+              <Pressable
+                style={styles.sheetCancel}
+                onPress={() => setConfirmDelete(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel delete"
+              >
+                <Text style={styles.sheetCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.sheetDelete}
+                onPress={() => {
+                  void deleteGroup();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Confirm delete group"
+              >
+                <Text style={styles.sheetDeleteText}>Delete</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -263,4 +355,65 @@ const styles = StyleSheet.create({
   addSmall: { color: '#818cf8', fontSize: 14, fontWeight: '600' },
   empty: { color: '#64748b', textAlign: 'center', marginTop: 16 },
   busyOverlay: { position: 'absolute', top: 60, right: 20 },
+  // ---- Danger zone (#14) -------------------------------------------------
+  dangerZone: {
+    marginTop: 16,
+    marginHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+  },
+  dangerTitle: {
+    color: '#f87171',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  deleteButton: {
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  deleteButtonText: { color: '#ef4444', fontSize: 14, fontWeight: '600' },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  sheet: {
+    backgroundColor: '#1e293b',
+    borderRadius: 14,
+    padding: 18,
+    width: '100%',
+    maxWidth: 340,
+    gap: 10,
+  },
+  sheetTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  sheetBody: { color: '#94a3b8', fontSize: 13 },
+  sheetActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 4,
+  },
+  sheetCancel: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: '#334155',
+  },
+  sheetCancelText: { color: '#e2e8f0', fontSize: 14, fontWeight: '600' },
+  sheetDelete: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    backgroundColor: '#ef4444',
+  },
+  sheetDeleteText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });

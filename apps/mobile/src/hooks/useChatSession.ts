@@ -127,6 +127,7 @@ export function useChatSession(identity: Identity | null) {
         // only appeared on Mobile after an app reload.
         case 'conversation.created':
         case 'conversation.updated':
+        case 'conversation.deleted':
         case 'conversation.member-joined':
         case 'conversation.member-left': {
           setConversations(prev =>

@@ -87,16 +87,29 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }).then(r => r.conversation),
-  /** Add members to a group — canonical member-joined reconciles clients. */
-  addMembers: (conversationId: string, userIds: string[]) =>
+  /** Add members to a group (admin-only) — canonical member-joined. */
+  addMembers: (
+    conversationId: string,
+    userIds: string[],
+    actorUserId: string,
+  ) =>
     request<{ added: number }>(
-      `/conversations/${encodeURIComponent(conversationId)}/members`,
+      `/conversations/${encodeURIComponent(conversationId)}/members?actor=${encodeURIComponent(actorUserId)}`,
       { method: 'POST', body: JSON.stringify({ userIds }) },
     ),
-  /** Remove a member (canonical member-left reconciles clients). */
-  removeMember: (conversationId: string, userId: string) =>
+  /** Remove a member (admin) or self-leave — canonical member-left. */
+  removeMember: (conversationId: string, userId: string, actorUserId: string) =>
     request<{ removed: boolean }>(
-      `/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}`,
+      `/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}?actor=${encodeURIComponent(actorUserId)}`,
+      { method: 'DELETE' },
+    ),
+  /**
+   * Delete a GROUP (tombstone — canonical conversation.deleted reconciles
+   * every member's client in realtime). Admin-only server-side (#38).
+   */
+  deleteConversation: (conversationId: string, actorUserId: string) =>
+    request<{ deleted: boolean; absent?: boolean }>(
+      `/conversations/${encodeURIComponent(conversationId)}?actor=${encodeURIComponent(actorUserId)}`,
       { method: 'DELETE' },
     ),
   /**

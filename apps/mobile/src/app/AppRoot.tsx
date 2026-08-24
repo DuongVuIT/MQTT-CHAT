@@ -2,6 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { pick, types as docTypes } from '@react-native-documents/picker';
+import {
+  normalizeMediaType,
+  resolveMediaType,
+} from '@mqtt-chat/mqtt-contracts';
 import { api } from '../lib/api';
 import { useChatSession, type Identity } from '../hooks/useChatSession';
 import { IdentityPickerScreen } from '../screens/IdentityPickerScreen';
@@ -43,13 +47,11 @@ function conversationTitle(
   );
 }
 
-/** Allowed upload content types (mirrors the API allowlist). */
-const ALLOWED_IMAGE_TYPES = [
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-];
+/**
+ * Canonical media policy — ONE source of truth in @mqtt-chat/mqtt-contracts
+ * (repair-log #26). Never raw-compares picker MIME: iOS reports JPEG as
+ * `image/jpg`; Android may report no MIME at all (filename fallback).
+ */
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export function AppRoot() {
@@ -169,16 +171,37 @@ export function AppRoot() {
       result => {
         const asset: Asset | undefined = result.assets?.[0];
         if (!asset?.uri) return; // user cancelled
-        const type = asset.type ?? 'image/jpeg';
-        if (!ALLOWED_IMAGE_TYPES.includes(type)) {
-          Alert.alert('Unsupported image', `Type ${type} is not allowed.`);
+        // Canonical normalization (repair-log #26): fold picker aliases
+        // (image/jpg → image/jpeg), fall back to the filename extension when
+        // the platform omits MIME, and give a PRECISE product error for
+        // intentionally-unsupported formats (HEIC/HEIF).
+        const resolved = resolveMediaType(asset.type, asset.fileName);
+        const normalized = normalizeMediaType(asset.type);
+        if (!resolved) {
+          const isHeic =
+            normalized === 'image/heic' ||
+            normalized === 'image/heif' ||
+            asset.fileName?.toLowerCase().endsWith('.heic') ||
+            asset.fileName?.toLowerCase().endsWith('.heif');
+          Alert.alert(
+            'Unsupported image',
+            isHeic
+              ? 'HEIC/HEIF photos are not supported yet. Share the photo as JPEG instead.'
+              : `Type ${normalized ?? 'unknown'} is not supported.`,
+          );
+          return;
+        }
+        if (!resolved.startsWith('image/')) {
+          Alert.alert('Unsupported image', `${resolved} is not an image type.`);
           return;
         }
         void handlePickedFile(
           {
             uri: asset.uri,
-            name: asset.fileName ?? `photo-${Date.now()}.jpg`,
-            type,
+            name:
+              asset.fileName ??
+              `photo-${Date.now()}.${resolved === 'image/png' ? 'png' : 'jpg'}`,
+            type: resolved, // canonical value — never re-validated server-side
             size: asset.fileSize ?? 0,
           },
           'IMAGE',
@@ -192,11 +215,15 @@ export function AppRoot() {
       .then(results => {
         const doc = results[0];
         if (!doc?.uri) return;
+        const name = doc.name ?? `document-${Date.now()}.pdf`;
+        // Same canonical policy as images (repair-log #26): normalize the
+        // platform MIME; fall back to the extension when absent.
+        const resolved = resolveMediaType(doc.type, name) ?? 'application/pdf';
         void handlePickedFile(
           {
             uri: doc.uri,
-            name: doc.name ?? `document-${Date.now()}.pdf`,
-            type: doc.type ?? 'application/pdf',
+            name,
+            type: resolved,
             size: doc.size ?? 0,
           },
           'FILE',
@@ -237,6 +264,7 @@ export function AppRoot() {
       c => c.id === route.conversationId,
     );
     if (!conversation) {
+      // Deleted under us (conversation.deleted) → leave the screen safely.
       setRoute({ screen: 'list' });
       return null;
     }
@@ -249,6 +277,7 @@ export function AppRoot() {
         onChanged={() => {
           void session.refreshConversations();
         }}
+        onDeleted={() => setRoute({ screen: 'list' })}
       />
     );
   }
@@ -303,7 +332,12 @@ export function AppRoot() {
   const activeConv = session.conversations.find(
     c => c.id === route.conversationId,
   );
-  void activeConv; // details screen re-reads from the session on open
+  if (!activeConv) {
+    // The open conversation was deleted in realtime (#28) — exit the chat
+    // safely instead of rendering a ghost conversation.
+    setRoute({ screen: 'list' });
+    return null;
+  }
 
   return (
     <View style={{ flex: 1 }}>
