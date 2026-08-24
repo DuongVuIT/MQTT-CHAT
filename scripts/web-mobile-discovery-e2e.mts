@@ -76,7 +76,11 @@ async function main(): Promise<void> {
     }),
   });
   const created = (await createdRes.json()) as { conversation: { id: string } };
-  check(createdRes.ok && Boolean(created.conversation?.id), "web created group", created.conversation?.id);
+  check(
+    createdRes.ok && Boolean(created.conversation?.id),
+    "web created group",
+    created.conversation?.id,
+  );
 
   // ---- Mobile discovers WITHOUT reload (bounded wait, no sleeps-as-readiness)
   let discovered: ApiConversation | null = null;
@@ -87,14 +91,16 @@ async function main(): Promise<void> {
   check(
     Boolean(discovered),
     "mobile list contains the new group via REALTIME (no reload)",
-    discovered ? discovered.title ?? "" : `events seen: ${events.map((e) => e.eventType).join(",")}`,
+    discovered
+      ? (discovered.title ?? "")
+      : `events seen: ${events.map((e) => e.eventType).join(",")}`,
   );
 
   // ---- Mobile opens + sends IMMEDIATELY; lifecycle must reach SENT -------
   const cmid = `msg-${run}`;
-  const history = await fetch(
-    `${API}/conversations/${created.conversation.id}/messages`,
-  ).then((r) => r.json() as Promise<{ messages: unknown[] }>);
+  const history = await fetch(`${API}/conversations/${created.conversation.id}/messages`).then(
+    (r) => r.json() as Promise<{ messages: unknown[] }>,
+  );
   void history; // open = history load (empty for a fresh group)
 
   let acked: RealtimeEvent | null = null;
@@ -119,38 +125,74 @@ async function main(): Promise<void> {
   check((await sendPromise) === "published", "publish resolved without unhandled rejection");
 
   // ---- DB canonical state: exactly ONE message ---------------------------
-  const dbState = (await fetch(
-    `${API}/conversations/${created.conversation.id}/messages`,
-  ).then((r) => r.json())) as { messages: Array<{ id: string; clientMessageId: string }> };
+  const dbState = (await fetch(`${API}/conversations/${created.conversation.id}/messages`).then(
+    (r) => r.json(),
+  )) as { messages: Array<{ id: string; clientMessageId: string }> };
   const mine = dbState.messages.filter((m) => m.clientMessageId === cmid);
-  check(dbState.messages.length === 1, "DB contains exactly ONE message", `got ${dbState.messages.length}`);
+  check(
+    dbState.messages.length === 1,
+    "DB contains exactly ONE message",
+    `got ${dbState.messages.length}`,
+  );
   check(mine.length === 1, "canonical row carries the SAME clientMessageId");
 
   // ---- Duplicate delivery collapses (idempotent reconcile) ---------------
   if (acked) {
     // Simulate QoS1 redelivery through the reducer-independent message path:
     // the message upsert is by id — assert via a second history read.
-    const again = (await fetch(
-      `${API}/conversations/${created.conversation.id}/messages`,
-    ).then((r) => r.json())) as { messages: Array<{ id: string }> };
+    const again = (await fetch(`${API}/conversations/${created.conversation.id}/messages`).then(
+      (r) => r.json(),
+    )) as { messages: Array<{ id: string }> };
     check(again.messages.length === 1, "redelivery produces no duplicate entity");
   }
 
   // ---- Membership event keeps discovery live for EXISTING groups ---------
-  const addRes = await fetch(`${API}/conversations/${created.conversation.id}/members`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userIds: [`${run}-extra`] }),
-  });
-  void addRes; // extra user may not exist — member-joined handling covered by unit tests
+  // Mint the extra user first so the add is a REAL membership transition
+  // (a nonexistent id would just trip the API's FK guard and prove nothing).
+  const extraUser = `u-${run}-extra`;
+  await createUser(extraUser, `Extra User ${run}`);
+  const addRes = await fetch(
+    `${API}/conversations/${created.conversation.id}/members?actor=${encodeURIComponent(webUser)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userIds: [extraUser] }),
+    },
+  );
+  check(addRes.ok, "member added via HTTP (member-joined path)", `status ${addRes.status}`);
+  let sawJoin = false;
+  for (let i = 0; i < 50 && !sawJoin; i++) {
+    await sleep(200);
+    sawJoin = events.some((e) => e.eventType === "conversation.member-joined");
+  }
+  check(sawJoin, "canonical conversation.member-joined observed realtime");
+  const joined = discovered
+    ? await fetch(`${API}/conversations/${created.conversation.id}`)
+        .then(
+          (r) => r.json() as Promise<{ conversation?: { members?: Array<{ userId: string }> } }>,
+        )
+        .catch(() => null)
+    : null;
+  check(
+    Boolean(joined?.conversation?.members?.some((m) => m.userId === extraUser)),
+    "post-change member summary carries the added user",
+  );
+  await fetch(`${API}/users/${extraUser}`, { method: "DELETE" });
 
   // ---- Cleanup: exact IDs -------------------------------------------------
-  await fetch(`${API}/conversations/${created.conversation.id}`, { method: "DELETE" });
+  await fetch(
+    `${API}/conversations/${created.conversation.id}?actor=${encodeURIComponent(webUser)}`,
+    {
+      method: "DELETE",
+    },
+  );
   await fetch(`${API}/users/${webUser}`, { method: "DELETE" });
   await fetch(`${API}/users/${mobileUser}`, { method: "DELETE" });
   await mobile.disconnect();
 
-  console.log(failed ? "WEB-MOBILE DISCOVERY E2E FAILED" : "WEB-MOBILE DISCOVERY E2E DONE — ALL PASS");
+  console.log(
+    failed ? "WEB-MOBILE DISCOVERY E2E FAILED" : "WEB-MOBILE DISCOVERY E2E DONE — ALL PASS",
+  );
   process.exit(failed ? 1 : 0);
 }
 
