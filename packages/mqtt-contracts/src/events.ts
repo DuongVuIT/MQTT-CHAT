@@ -45,6 +45,22 @@ export const messageDeletedDataSchema = z.object({
 export type MessageDeletedData = z.infer<typeof messageDeletedDataSchema>;
 export type MessageDeletedEvent = EventEnvelope<MessageDeletedData>;
 
+/**
+ * A message.send command was REJECTED by the authority (chat-worker) — e.g.
+ * invalid replyToId target, sender not a member, unknown conversation.
+ * Published so the originating client can fail its optimistic entry
+ * DETERMINISTICALLY instead of waiting out the reconciliation timeout
+ * (repair-log #27). `conversationId` is best-effort: rejections for unknown
+ * conversations may carry null.
+ */
+export const messageRejectedDataSchema = z.object({
+  clientMessageId: z.string().min(1),
+  reason: z.string().min(1),
+  conversationId: z.string().min(1).nullable(),
+});
+export type MessageRejectedData = z.infer<typeof messageRejectedDataSchema>;
+export type MessageRejectedEvent = EventEnvelope<MessageRejectedData>;
+
 export const reactionAddedDataSchema = z.object({
   messageId: z.string().min(1),
   conversationId: z.string().min(1),
@@ -140,6 +156,7 @@ export const EVENT_SCHEMAS = {
   "message.created": messageEventDataSchema,
   "message.edited": messageEditedDataSchema,
   "message.deleted": messageDeletedDataSchema,
+  "message.rejected": messageRejectedDataSchema,
   "reaction.added": reactionAddedDataSchema,
   "reaction.removed": reactionRemovedDataSchema,
   "receipt.read": receiptReadDataSchema,

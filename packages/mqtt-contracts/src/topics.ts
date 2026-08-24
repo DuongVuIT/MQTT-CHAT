@@ -31,6 +31,8 @@ export const EVENT_TOPICS = {
   messageCreated: `${TOPIC_NAMESPACE}/events/message/created`,
   messageEdited: `${TOPIC_NAMESPACE}/events/message/edited`,
   messageDeleted: `${TOPIC_NAMESPACE}/events/message/deleted`,
+  /** Command-level rejection (invalid reply target, non-member sender…). */
+  messageRejected: `${TOPIC_NAMESPACE}/events/message/rejected`,
   reactionAdded: `${TOPIC_NAMESPACE}/events/reaction/added`,
   reactionRemoved: `${TOPIC_NAMESPACE}/events/reaction/removed`,
   receiptDelivered: `${TOPIC_NAMESPACE}/events/receipt/delivered`,
