@@ -49,13 +49,26 @@ export function useChatSession(identity: Identity | null) {
   const clientRef = useRef<ChatRealtimeClient | null>(null);
   const lifecycleRef = useRef<MessageLifecycleStore | null>(null);
 
+  // Latest-conversations mirror: lets callbacks that only need to ENUMERATE
+  // conversations stay reference-stable. Historical perf bug: refreshPending
+  // depended on `conversations`, and applyMessageActivity allocates a fresh
+  // array on every message.created — so the realtime-client effect listed
+  // refreshPending in its deps and TEARD DOWN AND RECONNECTED MQTT on
+  // essentially every inbound message (discarding pending sends and
+  // triggering history refetch storms).
+  const conversationsRef = useRef(conversations);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  // Stable across renders by construction (reads state through refs).
   const refreshPending = useCallback(() => {
     const store = lifecycleRef.current;
     if (!store) return;
     const next: Record<string, number> = {};
-    for (const c of conversations) next[c.id] = store.getPending(c.id).length;
+    for (const c of conversationsRef.current) next[c.id] = store.getPending(c.id).length;
     setPendingByConv(next);
-  }, [conversations]);
+  }, []);
 
   // Bootstrap: users + conversations + presence snapshot.
   useEffect(() => {
@@ -444,6 +457,10 @@ export function useChatSession(identity: Identity | null) {
     void lifecycleRef.current?.flushQueued().catch(() => {
       /* per-message failures already marked failed */
     });
+    // Heal the conversation LIST too: reuse/adoption DM creates emit no
+    // realtime event, and QoS1 can drop list mutations published while
+    // offline. Web heals the same way after reconnect.
+    void refreshConversations();
     const opened = Object.keys(messagesByConv);
     if (opened.length === 0) return;
     let cancelled = false;
@@ -465,7 +482,7 @@ export function useChatSession(identity: Identity | null) {
     return () => {
       cancelled = true;
     };
-  }, [status, messagesByConv]);
+  }, [status, messagesByConv, refreshConversations]);
 
   return useMemo(
     () => ({
