@@ -33,7 +33,9 @@
     "docker:down": "docker compose down",
     "db:migrate": "pnpm --filter @mqtt-chat/database db:migrate",
     "db:seed": "pnpm --filter @mqtt-chat/database db:seed",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "turbo run clean && rm -rf node_modules",
+    "smoke:dev": "API_URL=http://localhost:3001/api MQTT_URL=mqtt://localhost:1883 node scripts/smoke.mjs",
+    "test:integration": "vitest run packages/ apps/"
   },
   "devDependencies": {
     "@eslint/js": "^9.26.0",
