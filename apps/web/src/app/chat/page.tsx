@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { api, type ApiConversation } from "@/lib/api";
-import { normalizeMessage } from "@mqtt-chat/realtime-core";
+import { normalizeConversation, normalizeMessage } from "@mqtt-chat/realtime-core";
 import { getRealtimeService, type ConnectionState } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
 import { loadStoredIdentity } from "@/lib/identity";
@@ -185,25 +185,10 @@ function handleEvent(envelope: EventEnvelope): void {
   const conversationId = envelope.conversationId ?? String(data["conversationId"] ?? "");
 
   /** Parse a canonical conversation summary into the REST list-item shape. */
+  /** ONE shared normalizer for every conversation entering the web UI. */
   const toConversation = (): ApiConversation => {
-    const rawMembers = Array.isArray(data["members"]) ? data["members"] : [];
-    return {
-      id: String(data["id"] ?? conversationId),
-      type: (data["type"] as ApiConversation["type"]) ?? "GROUP",
-      title: (data["title"] as string | null) ?? null,
-      memberCount: Number(data["memberCount"] ?? rawMembers.length),
-      lastSequence: Number(data["lastSequence"] ?? 0),
-      lastMessagePreview: (data["lastMessagePreview"] as string | null) ?? null,
-      lastMessageAt: (data["lastMessageAt"] as string | null) ?? null,
-      members: rawMembers.map((m) => {
-        const member = m as Record<string, unknown>;
-        return {
-          userId: String(member["userId"]),
-          role: String(member["role"] ?? "MEMBER"),
-          lastReadSequence: Number(member["lastReadSequence"] ?? 0),
-        };
-      }),
-    };
+    const conversation = normalizeConversation({ ...data, id: data["id"] ?? conversationId });
+    return conversation;
   };
 
   switch (envelope.eventType) {

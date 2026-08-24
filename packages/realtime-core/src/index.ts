@@ -82,6 +82,92 @@ function asNullableIso(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+// ---------------------------------------------------------------------------
+// Canonical conversation normalization — same rationale as normalizeMessage:
+// ONE boundary between wire data (HTTP list rows, conversation.created /
+// member-joined / member-left / updated events) and the UI model, shared by
+// web and mobile. Guarantees `members` is ALWAYS an array (historical crash
+// class: conversation.members.find on incomplete payloads).
+// ---------------------------------------------------------------------------
+
+export interface NormalizedConversationMember {
+  userId: string;
+  role: string;
+  lastReadSequence: number;
+}
+
+export interface NormalizedConversation {
+  id: string;
+  type: "DIRECT" | "GROUP";
+  title: string | null;
+  memberCount: number;
+  lastSequence: number;
+  lastMessagePreview: string | null;
+  lastMessageAt: string | null;
+  members: NormalizedConversationMember[];
+}
+
+/**
+ * Normalize ANY conversation-shaped payload into the canonical UI model.
+ * Never throws; malformed members entries are dropped; missing arrays
+ * become empty arrays.
+ */
+export function normalizeConversation(raw: unknown): NormalizedConversation {
+  const source = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+
+  const members = Array.isArray(source["members"])
+    ? (source["members"] as Array<Record<string, unknown>>)
+        .filter((m): m is Record<string, unknown> => typeof m === "object" && m !== null)
+        .map((m) => ({
+          userId: asString(m["userId"], ""),
+          role: asString(m["role"], "MEMBER"),
+          lastReadSequence: Number.isFinite(Number(m["lastReadSequence"]))
+            ? Number(m["lastReadSequence"])
+            : 0,
+        }))
+        .filter((m) => m.userId.length > 0)
+    : [];
+
+  const type = source["type"] === "DIRECT" ? "DIRECT" : "GROUP";
+
+  return {
+    id: asString(source["id"], ""),
+    type,
+    title: asNullableIso(source["title"]),
+    memberCount: Number.isFinite(Number(source["memberCount"]))
+      ? Number(source["memberCount"])
+      : members.length,
+    lastSequence: Number.isFinite(Number(source["lastSequence"]))
+      ? Number(source["lastSequence"])
+      : 0,
+    lastMessagePreview: asNullableIso(source["lastMessagePreview"]),
+    lastMessageAt: asNullableIso(source["lastMessageAt"]),
+    members,
+  };
+}
+
+/**
+ * Upsert ONE conversation entity into a list (identity = conversation id).
+ * Preserves locally-known activity (preview/time/sequence) when the incoming
+ * payload carries no message info (membership events), and never regresses
+ * lastSequence. Returns a NEW list; duplicates collapse to ONE entity.
+ */
+export function upsertConversationInto(
+  list: NormalizedConversation[],
+  incoming: NormalizedConversation,
+): NormalizedConversation[] {
+  const existing = list.find((c) => c.id === incoming.id);
+  const merged: NormalizedConversation = existing
+    ? {
+        ...incoming,
+        lastMessagePreview: incoming.lastMessagePreview ?? existing.lastMessagePreview,
+        lastMessageAt: incoming.lastMessageAt ?? existing.lastMessageAt,
+        lastSequence: Math.max(existing.lastSequence, incoming.lastSequence),
+      }
+    : incoming;
+  return existing ? list.map((c) => (c.id === incoming.id ? merged : c)) : [merged, ...list];
+}
+
 /**
  * Normalize ANY message-shaped payload (HTTP history row, canonical MQTT
  * event data, legacy persisted message, bot message) into the canonical UI
