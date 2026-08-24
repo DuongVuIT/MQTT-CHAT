@@ -16,10 +16,10 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  devices       Device[]
-  memberships   ConversationMember[]
-  messages      Message[]
-  reactions     MessageReaction[]
+  devices     Device[]
+  memberships ConversationMember[]
+  messages    Message[]
+  reactions   MessageReaction[]
 }
 
 model Device {
@@ -48,6 +48,11 @@ model Conversation {
   lastSequence  Int              @default(0)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+  // Soft-delete tombstone (repair-log #28): deleted groups keep their
+  // history (sequence/receipts/audit stay intact) but vanish from lists
+  // and reject all further sends.
+  deletedAt     DateTime?
+  deletedBy     String?
 
   members   ConversationMember[]
   messages  Message[]
@@ -96,10 +101,10 @@ model Message {
   editedAt        DateTime?
   deletedAt       DateTime?
 
-  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       User               @relation(fields: [senderId], references: [id])
-  replyTo      Message?           @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies      Message[]          @relation("MessageReplies")
+  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User              @relation(fields: [senderId], references: [id])
+  replyTo      Message?          @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      Message[]         @relation("MessageReplies")
   reactions    MessageReaction[]
 
   @@unique([conversationId, sequence]) // monotonic per-conversation ordering
@@ -131,7 +136,7 @@ model MessageReaction {
 
   message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@id([messageId, userId, emoji])
   @@index([conversationId])
@@ -140,16 +145,16 @@ model MessageReaction {
 // ---------- Transactional outbox ----------
 
 model OutboxEvent {
-  id           String    @id @default(cuid())
-  eventType    String
+  id            String    @id @default(cuid())
+  eventType     String
   aggregateType String
-  aggregateId  String
-  payload      Json
-  topic        String
-  createdAt    DateTime  @default(now())
-  publishedAt  DateTime?
-  attemptCount Int       @default(0)
-  lastError    String?
+  aggregateId   String
+  payload       Json
+  topic         String
+  createdAt     DateTime  @default(now())
+  publishedAt   DateTime?
+  attemptCount  Int       @default(0)
+  lastError     String?
 
   @@index([publishedAt, createdAt])
 }
@@ -164,11 +169,11 @@ model Bot {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  rules          BotRule[]
-  eventLogs      BotEventLog[]
-  commandLogs    BotCommandLog[]
-  executionLogs  BotExecutionLog[]
-  scheduledJobs  BotScheduledJob[]
+  rules         BotRule[]
+  eventLogs     BotEventLog[]
+  commandLogs   BotCommandLog[]
+  executionLogs BotExecutionLog[]
+  scheduledJobs BotScheduledJob[]
 }
 
 model BotRule {
@@ -205,15 +210,15 @@ model BotEventLog {
 }
 
 model BotCommandLog {
-  id          String   @id @default(cuid())
-  botId       String
-  command     String
-  args        String[] @default([])
-  userId      String
+  id             String   @id @default(cuid())
+  botId          String
+  command        String
+  args           String[] @default([])
+  userId         String
   conversationId String
-  success     Boolean
-  response    String?
-  executedAt  DateTime @default(now())
+  success        Boolean
+  response       String?
+  executedAt     DateTime @default(now())
 
   bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
 
@@ -221,7 +226,7 @@ model BotCommandLog {
 }
 
 model BotExecutionLog {
-  id            String   @id @default(cuid())
+  id            String             @id @default(cuid())
   botId         String
   ruleId        String?
   actionType    String
@@ -231,7 +236,7 @@ model BotExecutionLog {
   error         String?
   correlationId String?
   causationId   String?
-  executedAt    DateTime @default(now())
+  executedAt    DateTime           @default(now())
 
   bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
 
@@ -245,17 +250,17 @@ enum BotExecutionStatus {
 }
 
 model BotScheduledJob {
-  id            String   @id @default(cuid())
-  botId         String
-  runAt         DateTime
-  recurring     Boolean  @default(false)
-  intervalMs    Int?
-  payload       Json
-  status        BotJobStatus @default(PENDING)
-  attempts      Int      @default(0)
-  lastError     String?
-  createdAt     DateTime @default(now())
-  completedAt   DateTime?
+  id          String       @id @default(cuid())
+  botId       String
+  runAt       DateTime
+  recurring   Boolean      @default(false)
+  intervalMs  Int?
+  payload     Json
+  status      BotJobStatus @default(PENDING)
+  attempts    Int          @default(0)
+  lastError   String?
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
 
   bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
 
