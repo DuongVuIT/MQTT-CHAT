@@ -203,7 +203,17 @@ const SUITES = [
   "scripts/duplicate-direct-e2e.mjs",
   "scripts/group-media-e2e.mjs",
   "scripts/notification-e2e.mjs",
+  // TypeScript suite (shared client + the app's REAL conversation reducer):
+  // Web→Mobile group discovery + immediate-send lifecycle.
+  "scripts/web-mobile-discovery-e2e.mts",
 ];
+
+/** .mts suites are TypeScript — run them through tsx. */
+function suiteCommand(suite) {
+  return suite.endsWith(".mts")
+    ? { cmd: "pnpm", args: ["exec", "tsx", suite] }
+    : { cmd: "node", args: [suite] };
+}
 
 // Only orchestrate when invoked directly (not imported for the fixture helper).
 if (
@@ -214,7 +224,8 @@ if (
     let failed = false;
     for (const suite of SUITES) {
       console.log(`\n[test-stack] ▶ ${suite}`);
-      const child = spawn("node", [suite], {
+      const { cmd, args } = suiteCommand(suite);
+      const child = spawn(cmd, args, {
         cwd: ROOT,
         stdio: "inherit",
         env: {

@@ -16,6 +16,8 @@ export default tseslint.config(
       "**/*.config.mjs",
       "**/vitest.config.ts",
       "**/next-env.d.ts",
+      // E2E harness scripts run via tsx outside any tsconfig project.
+      "scripts/**/*.mts",
       // React Native tooling configs are CommonJS by framework convention.
       "apps/mobile/metro.config.js",
       "apps/mobile/babel.config.js",

@@ -42,6 +42,7 @@
     "globals": "^16.0.0",
     "prettier": "^3.5.3",
     "puppeteer-core": "^25.8.0",
+    "tsx": "^4.23.12",
     "turbo": "^2.5.4",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.32.0",
