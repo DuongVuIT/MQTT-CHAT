@@ -24,10 +24,20 @@ async function main(): Promise<void> {
 
   const db = createDb();
   const redis = createRedisClient(env.REDIS_URL);
+  // Deferred-ack bridge (P0-185): the client PUBACKs a command only after
+  // ChatWorker.consume settles, so a crash mid-processing leaves the command
+  // unacked and the broker redelivers — at-least-once actually reaches the
+  // handler. The worker instance exists after infra handles are up, hence the
+  // late-bound ref; deliveries cannot arrive before start() subscribes.
+  let consumeCommand: ((topic: string, payload: Buffer) => Promise<void>) | null = null;
   const mqtt = createMqttClient({
     url: env.MQTT_URL,
     clientId: `chat-worker-${process.pid}-${Date.now()}`,
     logger: log,
+    handleMessage: (topic, payload) => {
+      if (!consumeCommand) throw new Error("chat-worker consumer not ready");
+      return consumeCommand(topic, payload);
+    },
   });
 
   await waitForConnect(mqtt);
@@ -44,6 +54,7 @@ async function main(): Promise<void> {
   };
 
   const worker = new ChatWorker(ctx, mqtt, "chat-workers");
+  consumeCommand = (topic, payload) => worker.consume(topic, payload);
   const outbox = new OutboxPublisher(db, mqtt, log.child({ component: "outbox" }));
 
   await worker.start();

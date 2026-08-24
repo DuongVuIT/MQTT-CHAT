@@ -19,6 +19,19 @@ export interface MqttClientOptions {
   keepalive?: number;
   reconnectPeriod?: number;
   connectTimeout?: number;
+  /**
+   * Deferred-ack delivery handler for QoS1 CONSUMERS (e.g. chat-worker).
+   * mqtt.js PUBACKs a QoS1 publish the moment it is handed over — BEFORE any
+   * consumer logic runs — so "acked then crashed" silently loses the command
+   * and at-least-once never actually reaches the handler. When this option is
+   * set, deliveries are routed here instead and the ack goes out only after
+   * the returned promise RESOLVES; a REJECTION skips the PUBACK entirely, so
+   * the broker redelivers (true crash-safe at-least-once). Consumers using
+   * this option must NOT also subscribe to the 'message' event (mqtt.js still
+   * emits it before invoking this hook) or every command would be processed
+   * twice.
+   */
+  handleMessage?: (topic: string, payload: Buffer) => Promise<void>;
 }
 
 /** Create a configured MQTT client with normalized logging. */
@@ -48,6 +61,30 @@ export function createMqttClient(options: MqttClientOptions): MqttClient {
   client.on("close", () => log.debug("MQTT closed"));
   client.on("offline", () => log.warn("MQTT offline"));
   client.on("error", (err) => log.error("MQTT error", { error: err.message }));
+
+  if (options.handleMessage) {
+    const userHandler = options.handleMessage;
+    // mqtt.js invokes the INSTANCE method handleMessage(packet, cb) after
+    // emitting 'message'; the PUBACK is sent only once our callback runs, and
+    // an ERROR callback skips the ack entirely (broker → redelivery). The
+    // internal `done` it chains to ignores errors, so rejecting here is safe:
+    // no crash, simply no ack.
+    client.handleMessage = (packet, callback) => {
+      const payload = Buffer.isBuffer(packet.payload)
+        ? packet.payload
+        : Buffer.from(packet.payload);
+      userHandler(packet.topic ?? "", payload)
+        .then(() => callback())
+        .catch((error: unknown) => {
+          const err = error instanceof Error ? error : new Error(String(error));
+          log.warn("Deferred-ack handler failed — skipping PUBACK so the broker redelivers", {
+            topic: packet.topic,
+            error: err.message,
+          });
+          callback(err);
+        });
+    };
+  }
 
   return client;
 }
