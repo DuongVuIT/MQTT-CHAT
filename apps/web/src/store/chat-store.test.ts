@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { useChatStore } from "./chat-store";
+import { republishPayload, useChatStore } from "./chat-store";
 import type { ApiConversation, ApiMessage } from "../lib/api";
 
 /**
@@ -340,9 +340,8 @@ describe("chat-store reaction contract defense", () => {
     useChatStore.getState().setMessages("conv-x", [sampleMessage("m1", "c1")], false);
 
     const reaction = () =>
-      (useChatStore.getState().messagesByConversation["conv-x"] ?? []).find(
-        (m) => m.id === "m1",
-      )?.reactions;
+      (useChatStore.getState().messagesByConversation["conv-x"] ?? []).find((m) => m.id === "m1")
+        ?.reactions;
 
     // First added → present. A REDELIVERED added must stay present.
     useChatStore.getState().applyReaction("m1", "❤️", "alice", true, "conv-x");
@@ -373,5 +372,67 @@ describe("chat-store reaction contract defense", () => {
     const list = useChatStore.getState().messagesByConversation["conv-x"] ?? [];
     expect(list).toHaveLength(1);
     expect(list[0]!.reactions).toEqual([{ emoji: "❤️", userId: "alice" }]);
+  });
+});
+
+describe("republishPayload — retry/flush payload fidelity", () => {
+  it("queued IMAGE upload keeps type + storage-key metadata on republish (P0-184)", () => {
+    // Exactly what publishOrQueueSend stores for an offline image upload:
+    // content is the optimistic 📎 text, the real payload lives in type/metadata.
+    const payload = republishPayload({
+      clientMessageId: "cmid-img",
+      conversationId: "conv-general",
+      content: "📎 photo.png",
+      replyToId: null,
+      type: "IMAGE",
+      metadata: { storageKey: "uploads/photo.png", filename: "photo.png", size: 123 },
+      status: "queued",
+    });
+    expect(payload.type).toBe("IMAGE");
+    expect(payload.metadata).toEqual({
+      storageKey: "uploads/photo.png",
+      filename: "photo.png",
+      size: 123,
+    });
+    expect(payload.clientMessageId).toBe("cmid-img");
+    expect(payload.conversationId).toBe("conv-general");
+  });
+
+  it("queued TEXT message republishes verbatim with its reply target", () => {
+    const payload = republishPayload({
+      clientMessageId: "cmid-txt",
+      conversationId: "conv-general",
+      content: "offline hello",
+      replyToId: "msg-9",
+      type: "TEXT",
+      metadata: null,
+      status: "queued",
+    });
+    expect(payload.type).toBe("TEXT");
+    expect(payload.content).toBe("offline hello");
+    expect(payload.replyToId).toBe("msg-9");
+    expect(payload.metadata).toBeNull();
+  });
+
+  it("legacy pending without a type field falls back to the historical 📎 heuristic", () => {
+    const file = republishPayload({
+      clientMessageId: "cmid-legacy-file",
+      conversationId: "conv-general",
+      content: "📎 old.bin",
+      replyToId: null,
+      status: "queued",
+    });
+    expect(file.type).toBe("FILE");
+    expect(file.content).toBe("");
+
+    const text = republishPayload({
+      clientMessageId: "cmid-legacy-text",
+      conversationId: "conv-general",
+      content: "plain text",
+      replyToId: null,
+      status: "queued",
+    });
+    expect(text.type).toBe("TEXT");
+    expect(text.content).toBe("plain text");
   });
 });

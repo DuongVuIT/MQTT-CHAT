@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type ApiConversation, type ApiMessage } from "@/lib/api";
 import { normalizeConversation, normalizeMessage } from "@mqtt-chat/realtime-core";
 import { getRealtimeService, type ConnectionState } from "@/lib/realtime-service";
-import { useChatStore } from "@/store/chat-store";
+import { republishPayload, useChatStore } from "@/store/chat-store";
 import { loadStoredIdentity } from "@/lib/identity";
 import { Sidebar } from "@/components/Sidebar";
 import { MessageList } from "@/components/MessageList";
@@ -173,21 +173,17 @@ export default function ChatPage() {
 
 /**
  * Flush messages that were QUEUED while offline. Republishes with the SAME
- * clientMessageId — chat-worker dedupes, so retries are idempotent.
+ * clientMessageId — chat-worker dedupes, so retries are idempotent — and the
+ * SAME logical payload via republishPayload: a queued IMAGE/FILE must come
+ * back with its type + storage-key metadata intact, not downgraded to a
+ * metadata-less FILE bubble.
  */
 function flushQueuedMessages(): void {
   const s = useChatStore.getState();
   for (const p of s.pendingMessages) {
     if (p.status !== "queued") continue;
     s.retryPending(p.clientMessageId);
-    getRealtimeService().publishCommand("message.send", {
-      conversationId: p.conversationId,
-      clientMessageId: p.clientMessageId,
-      content: p.content.startsWith("📎") ? "" : p.content,
-      type: p.content.startsWith("📎") ? "FILE" : "TEXT",
-      replyToId: p.replyToId,
-      metadata: null,
-    });
+    getRealtimeService().publishCommand("message.send", republishPayload(p));
   }
 }
 

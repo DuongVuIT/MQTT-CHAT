@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { api, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
-import { useChatStore } from "@/store/chat-store";
+import { republishPayload, useChatStore } from "@/store/chat-store";
 
 const TYPING_DEBOUNCE_MS = 2000;
 /** If no canonical message.created arrives within this window, mark failed. */
@@ -75,15 +75,7 @@ export function retryPendingMessage(clientMessageId: string): void {
   const pending = s.pendingMessages.find((p) => p.clientMessageId === clientMessageId);
   if (!pending) return;
   s.retryPending(clientMessageId);
-  getRealtimeService().publishCommand("message.send", {
-    conversationId: pending.conversationId,
-    clientMessageId,
-    // Legacy pendings (pre-type-field) keep the historical 📎 heuristic.
-    content: pending.type === undefined && pending.content.startsWith("📎") ? "" : pending.content,
-    type: pending.type ?? (pending.content.startsWith("📎") ? "FILE" : "TEXT"),
-    replyToId: pending.replyToId,
-    metadata: pending.metadata ?? null,
-  });
+  getRealtimeService().publishCommand("message.send", republishPayload(pending));
   armSendTimeout(clientMessageId);
 }
 

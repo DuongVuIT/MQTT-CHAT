@@ -23,6 +23,33 @@ export interface PendingMessage {
   status: "queued" | "pending" | "failed";
 }
 
+/**
+ * Build the exact `message.send` payload for re-publishing a pending entry —
+ * shared by the manual RETRY button AND the offline-queue FLUSH so the two
+ * paths cannot drift apart. Dropping `type`/`metadata` here would turn a
+ * queued IMAGE/FILE into a metadata-less broken bubble on reconnect
+ * (repair-log #34 wave follow-up: offline flush lost the storage key).
+ * Pendings created before the `type` field existed keep the historical
+ * 📎-content heuristic.
+ */
+export function republishPayload(p: PendingMessage): {
+  conversationId: string;
+  clientMessageId: string;
+  content: string;
+  type: string;
+  replyToId: string | null;
+  metadata: unknown;
+} {
+  return {
+    conversationId: p.conversationId,
+    clientMessageId: p.clientMessageId,
+    content: p.type === undefined && p.content.startsWith("📎") ? "" : p.content,
+    type: p.type ?? (p.content.startsWith("📎") ? "FILE" : "TEXT"),
+    replyToId: p.replyToId,
+    metadata: p.metadata ?? null,
+  };
+}
+
 export interface ChatState {
   identity: { userId: string; deviceId: string } | null;
   users: ApiUser[];
