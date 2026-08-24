@@ -55,7 +55,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    throw new Error(`API ${res.status}: ${path}`);
+    // Surface the SERVER's reason (canonical error body is
+    // { error: { code, message } }) — a raw "403: /path" tells the user
+    // nothing. Falls back to the status+path when the body is not parseable.
+    const body = (await res.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(body?.error?.message ?? `API ${res.status}: ${path}`);
   }
   return (await res.json()) as T;
 }

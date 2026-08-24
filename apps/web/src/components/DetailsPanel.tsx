@@ -137,7 +137,9 @@ export function DetailsPanel({ conversation }: { conversation: ApiConversation |
               : ""}
             )
           </span>
-          {conversation.type === "GROUP" && (
+          {conversation.type === "GROUP" && isAdmin && (
+            // Permission model (#38): only an ADMIN may add members — hide
+            // the affordance for everyone else instead of inviting a 403.
             <button
               type="button"
               aria-label="Add member"

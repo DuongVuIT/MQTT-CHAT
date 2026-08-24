@@ -143,17 +143,22 @@ export function GroupDetailsScreen({
         subtitle={`${members.length} members`}
         onBack={onBack}
         right={
-          <Pressable
-            onPress={() => setAdding(v => !v)}
-            hitSlop={8}
-            accessibilityLabel="Add member"
-          >
-            <Text style={styles.add}>+ Add</Text>
-          </Pressable>
+          // Permission model (#38): only an ADMIN may add members — the
+          // affordance is hidden for everyone else instead of inviting a
+          // guaranteed 403.
+          isAdmin ? (
+            <Pressable
+              onPress={() => setAdding(v => !v)}
+              hitSlop={8}
+              accessibilityLabel="Add member"
+            >
+              <Text style={styles.add}>+ Add</Text>
+            </Pressable>
+          ) : undefined
         }
       />
 
-      {adding && (
+      {adding && isAdmin && (
         <View style={styles.addPanel}>
           <TextInput
             style={styles.search}
@@ -210,6 +215,10 @@ export function GroupDetailsScreen({
         renderItem={({ item }) => {
           const user = users.find(u => u.id === item.userId);
           const isSelf = item.userId === identityUserId;
+          // Permission model (#38), mirroring web: an ADMIN may remove
+          // OTHERS; any member may remove THEMSELVES (leave). Everyone else
+          // sees no action — the server would reject it with 403 anyway.
+          const canRemove = isAdmin ? !isSelf : isSelf;
           return (
             <View style={styles.row}>
               <View style={styles.avatar}>
@@ -227,13 +236,32 @@ export function GroupDetailsScreen({
                   <Text style={styles.roleText}>ADMIN</Text>
                 </View>
               )}
-              {!isSelf && (
+              {canRemove && (
                 <Pressable
                   hitSlop={8}
                   disabled={busy}
-                  onPress={() => removeMember(item.userId)}
+                  onPress={() => {
+                    if (isSelf) {
+                      Alert.alert(
+                        'Leave group',
+                        'You will no longer receive messages from this group.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Leave',
+                            style: 'destructive',
+                            onPress: () => removeMember(item.userId),
+                          },
+                        ],
+                      );
+                    } else {
+                      removeMember(item.userId);
+                    }
+                  }}
                 >
-                  <Text style={styles.remove}>Remove</Text>
+                  <Text style={isSelf ? styles.leave : styles.remove}>
+                    {isSelf ? 'Leave' : 'Remove'}
+                  </Text>
                 </Pressable>
               )}
             </View>
@@ -352,6 +380,8 @@ const styles = StyleSheet.create({
   },
   roleText: { color: '#fbbf24', fontSize: 10, fontWeight: '700' },
   remove: { color: '#f87171', fontSize: 13 },
+  // Self-leave is a neutral action (web parity) — not destructive red.
+  leave: { color: '#818cf8', fontSize: 13 },
   addSmall: { color: '#818cf8', fontSize: 14, fontWeight: '600' },
   empty: { color: '#64748b', textAlign: 'center', marginTop: 16 },
   busyOverlay: { position: 'absolute', top: 60, right: 20 },
