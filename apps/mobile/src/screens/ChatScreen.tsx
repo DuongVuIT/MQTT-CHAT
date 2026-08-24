@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { mediaUrl } from '../lib/config';
 import type { ApiMessage } from '../lib/api';
 import type { PendingMessage } from '../features/messaging/message-lifecycle';
@@ -105,6 +106,7 @@ export function ChatScreen({
   const [editing, setEditing] = useState<ApiMessage | null>(null);
   const [menuFor, setMenuFor] = useState<ApiMessage | null>(null);
   const [reactingFor, setReactingFor] = useState<ApiMessage | null>(null);
+  const [attachSheet, setAttachSheet] = useState(false);
   const listRef = useRef<FlatList<ApiMessage>>(null);
   const insets = useSafeAreaInsets();
 
@@ -153,31 +155,24 @@ export function ChatScreen({
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {/* Header — always below the safe-area top */}
-      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Pressable onPress={onBack} hitSlop={8}>
-          <Text style={styles.back}>‹ Back</Text>
-        </Pressable>
-        <Pressable
-          style={styles.headerText}
-          disabled={!isGroup}
-          onPress={onOpenDetails}
-        >
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-          {!!subtitle && (
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {subtitle}
-            </Text>
-          )}
-        </Pressable>
-        {isGroup && (
-          <Pressable onPress={onOpenDetails} hitSlop={8}>
-            <Text style={styles.details}>Details</Text>
-          </Pressable>
-        )}
-      </View>
+      {/* ONE header primitive (#10) — back never wraps, title centered */}
+      <ScreenHeader
+        title={title}
+        subtitle={subtitle}
+        onBack={onBack}
+        onPressTitle={isGroup ? onOpenDetails : undefined}
+        right={
+          isGroup ? (
+            <Pressable
+              onPress={onOpenDetails}
+              hitSlop={8}
+              accessibilityLabel="Open group details"
+            >
+              <Text style={styles.details}>ⓘ</Text>
+            </Pressable>
+          ) : undefined
+        }
+      />
 
       <FlatList
         ref={listRef}
@@ -372,9 +367,8 @@ export function ChatScreen({
         <View style={styles.composerRow}>
           <Pressable
             style={styles.attachBtn}
-            onPress={() => actions.pickImage()}
-            onLongPress={() => actions.pickDocument()}
-            accessibilityLabel="Attach"
+            onPress={() => setAttachSheet(true)}
+            accessibilityLabel="Attach photo or file"
           >
             <Text style={styles.attachText}>📎</Text>
           </Pressable>
@@ -396,8 +390,56 @@ export function ChatScreen({
             <Text style={styles.sendText}>{editing ? '✓' : '➤'}</Text>
           </Pressable>
         </View>
-        <Text style={styles.attachHint}>📎 tap = photo · hold = document</Text>
       </View>
+
+      {/* Attachment chooser (#58/#59) — visible tap targets, no hidden gesture */}
+      <Modal
+        visible={attachSheet}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAttachSheet(false)}
+      >
+        <Pressable
+          style={styles.sheetBackdrop}
+          onPress={() => setAttachSheet(false)}
+        >
+          <Pressable style={styles.sheet} onPress={() => undefined}>
+            <Text style={styles.sheetHeading}>Attach</Text>
+            <Pressable
+              style={styles.sheetOption}
+              onPress={() => {
+                setAttachSheet(false);
+                actions.pickImage();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Choose photo"
+            >
+              <Text style={styles.sheetOptionIcon}>🖼️</Text>
+              <Text style={styles.sheetOptionText}>Choose Photo</Text>
+            </Pressable>
+            <Pressable
+              style={styles.sheetOption}
+              onPress={() => {
+                setAttachSheet(false);
+                actions.pickDocument();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Choose file"
+            >
+              <Text style={styles.sheetOptionIcon}>📄</Text>
+              <Text style={styles.sheetOptionText}>Choose File</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.sheetOption, styles.sheetCancel]}
+              onPress={() => setAttachSheet(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel attach"
+            >
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Long-press action menu (cross-platform modal — no extra deps) */}
       <Modal
@@ -635,12 +677,45 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendText: { color: '#fff', fontSize: 17 },
-  attachHint: {
-    color: '#475569',
-    fontSize: 10,
-    textAlign: 'center',
-    paddingVertical: 3,
+  // Attachment chooser sheet (#58)
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.6)',
+    justifyContent: 'flex-end',
   },
+  sheet: {
+    backgroundColor: '#1e293b',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 24,
+    gap: 4,
+  },
+  sheetHeading: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  sheetOptionIcon: { fontSize: 20 },
+  sheetOptionText: { color: '#e2e8f0', fontSize: 16 },
+  sheetCancel: {
+    justifyContent: 'center',
+    marginTop: 4,
+    backgroundColor: '#334155',
+  },
+  sheetCancelText: { color: '#e2e8f0', fontSize: 15, fontWeight: '600' },
   menuOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',

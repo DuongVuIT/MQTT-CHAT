@@ -67,14 +67,14 @@ export function ConversationListScreen({
         </Pressable>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Conversations</Text>
-          <Text
+          {/* Subtle secondary indicator (#46) — a small dot, not a pill. */}
+          <View
             style={[
-              styles.badge,
-              status === 'connected' ? styles.badgeOk : styles.badgeBad,
+              styles.statusDot,
+              status === 'connected' ? styles.statusOk : styles.statusBad,
             ]}
-          >
-            {status}
-          </Text>
+            accessibilityLabel={`Connection: ${status}`}
+          />
         </View>
         <Pressable
           style={styles.newBtn}
@@ -122,9 +122,19 @@ export function ConversationListScreen({
           );
         }}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            No conversations yet{'\n'}Tap ＋ to start one
-          </Text>
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyTitle}>No conversations yet</Text>
+            <Text style={styles.emptyBody}>
+              Start a direct message or create a group.
+            </Text>
+            <Pressable
+              style={styles.emptyCta}
+              onPress={onNew}
+              accessibilityLabel="New conversation"
+            >
+              <Text style={styles.emptyCtaText}>New conversation</Text>
+            </Pressable>
+          </View>
         }
       />
     </View>
@@ -167,15 +177,26 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   time: { color: '#64748b', fontSize: 11 },
-  badge: {
-    fontSize: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-    overflow: 'hidden',
+  // Subtle connection indicator (#46): small dot, secondary prominence.
+  statusDot: { width: 8, height: 8, borderRadius: 4, marginLeft: 8 },
+  statusOk: { backgroundColor: '#34d399' },
+  statusBad: { backgroundColor: '#ef4444' },
+  emptyWrap: { alignItems: 'center', marginTop: 96, paddingHorizontal: 32 },
+  emptyTitle: { color: '#f8fafc', fontSize: 17, fontWeight: '700' },
+  emptyBody: {
+    color: '#94a3b8',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 6,
   },
-  badgeOk: { color: '#052e16', backgroundColor: '#22c55e' },
-  badgeBad: { color: '#fff', backgroundColor: '#ef4444' },
+  emptyCta: {
+    marginTop: 16,
+    backgroundColor: '#4f46e5',
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  emptyCtaText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   item: { paddingHorizontal: 16, paddingVertical: 10 },
   avatarRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: {
