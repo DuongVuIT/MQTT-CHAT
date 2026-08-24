@@ -46,6 +46,24 @@ export type MessageDeletedData = z.infer<typeof messageDeletedDataSchema>;
 export type MessageDeletedEvent = EventEnvelope<MessageDeletedData>;
 
 /**
+ * conversation.deleted — the group was DELETED (tombstone). The conversation
+ * row keeps its history (soft-delete: deletedAt/deletedBy on the row), but it
+ * is gone from every list and rejects all further sends. `memberIds` is the
+ * pre-delete member snapshot so EVERY relevant client — regardless of which
+ * topics it listens to — can deterministically remove the entity.
+ */
+export const conversationDeletedDataSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().nullable(),
+  deletedBy: z.string().min(1),
+  deletedAt: z.string().datetime(),
+  lastSequence: z.number().int().nonnegative(),
+  memberIds: z.array(z.string().min(1)).min(1),
+});
+export type ConversationDeletedData = z.infer<typeof conversationDeletedDataSchema>;
+export type ConversationDeletedEvent = EventEnvelope<ConversationDeletedData>;
+
+/**
  * A message.send command was REJECTED by the authority (chat-worker) — e.g.
  * invalid replyToId target, sender not a member, unknown conversation.
  * Published so the originating client can fail its optimistic entry
@@ -165,6 +183,7 @@ export const EVENT_SCHEMAS = {
   "presence.online": presenceEventDataSchema,
   "presence.offline": presenceEventDataSchema,
   "conversation.created": conversationCreatedDataSchema,
+  "conversation.deleted": conversationDeletedDataSchema,
   "conversation.member-joined": conversationMemberJoinedDataSchema,
   "conversation.member-left": conversationMemberLeftDataSchema,
 } as const;

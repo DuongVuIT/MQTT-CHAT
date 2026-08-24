@@ -43,6 +43,7 @@ export const EVENT_TOPICS = {
   presenceOffline: `${TOPIC_NAMESPACE}/events/presence/offline`,
   conversationCreated: `${TOPIC_NAMESPACE}/events/conversation/created`,
   conversationUpdated: `${TOPIC_NAMESPACE}/events/conversation/updated`,
+  conversationDeleted: `${TOPIC_NAMESPACE}/events/conversation/deleted`,
   conversationMemberJoined: `${TOPIC_NAMESPACE}/events/conversation/member-joined`,
   conversationMemberLeft: `${TOPIC_NAMESPACE}/events/conversation/member-left`,
   mediaUploaded: `${TOPIC_NAMESPACE}/events/media/uploaded`,
