@@ -17,7 +17,15 @@ fs.mkdirSync(rnDir, { recursive: true });
 for (const pkg of ["gradle-plugin", "codegen"]) {
   const dest = path.join(rnDir, pkg);
   if (fs.existsSync(path.join(dest, "package.json"))) continue;
-  const pattern = path.join(repoRoot, "node_modules", ".pnpm", `@react-native+${pkg}@*`, "node_modules", "@react-native", pkg);
+  const pattern = path.join(
+    repoRoot,
+    "node_modules",
+    ".pnpm",
+    `@react-native+${pkg}@*`,
+    "node_modules",
+    "@react-native",
+    pkg,
+  );
   const found = execSync(`ls -d ${pattern} 2>/dev/null | head -1`, { encoding: "utf8" }).trim();
   if (!found) {
     console.warn(`[mobile-postinstall] ${pkg} not found in pnpm store — skipping`);
