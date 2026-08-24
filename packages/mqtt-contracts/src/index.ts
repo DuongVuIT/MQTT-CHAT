@@ -3,6 +3,7 @@ export * from "./qos";
 export * from "./envelope";
 export * from "./commands";
 export * from "./events";
+export * from "./media";
 
 import type { Actor, CommandEnvelope, EventEnvelope, Origin } from "./envelope";
 
