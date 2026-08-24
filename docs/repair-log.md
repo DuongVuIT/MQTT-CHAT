@@ -573,3 +573,149 @@ function` at runtime from `admin-api.ts`; the live event stream never came up.
   canonical ack within a bounded timeout, with EXACTLY ONE DB message.
   Plus 9 jest reducer cases (discovery, dedupe, member-left self/other,
   monotonic summary). Result: 7/7 isolated suites PASS.
+
+# Bug #24 — Reactions made on any client never rendered in Mobile realtime (chips stale until reopen)
+
+- **Symptom**: Tapping a reaction chip on Mobile did nothing visible; reactions
+  added on Web appeared on Mobile only after leaving and reopening the
+  conversation (history refetch). Even the actor's own reaction had no
+  realtime feedback.
+- **Root cause** (found by adversarial audit of fdb2970..2589523): a436b73
+  shipped the full reaction UI + command senders on Mobile, but the
+  `handleEvent` switch in `useChatSession` had NO case for canonical
+  `reaction.added` / `reaction.removed` — the events (delivered via the
+  all-events wildcard) were dropped on the floor, same failure class as #23.
+  Web handled both events (`s.toggleReaction`); Mobile silently ignored them.
+- **Fix**:
+  1. `features/conversations/conversation-events.ts` — new pure reducer
+     `applyReactionEvent(list, eventType, data)`: authoritative by event type
+     (added ⇒ present, removed ⇒ absent), idempotent under QoS1 redelivery
+     (re-applying never flips state — deliberately NOT a blind toggle),
+     malformed payloads return the SAME reference.
+  2. `useChatSession.handleEvent` gained `reaction.added`/`reaction.removed`
+     cases applying the reducer across `messagesByConv`.
+- **Regression test**: 5 jest cases (cross-client render, exact-pair removal,
+  QoS1 idempotence incl. reference equality, malformed payloads, unknown
+  message). Mobile jest 24/24, tsc PASS.
+- **Executed verification**: full gates + isolated E2E re-run after the change.
+
+# Bug #25 — Intermittent silent loss of MQTT commands in DEV: zombie test-stack workers held shared subscriptions
+
+- **Symptom**: Browser E2E failed intermittently ("message delivered to second
+  browser realtime" / "canonical message.created observed by broker observer"
+  saw NOTHING) while earlier identical runs passed. Commands vanished with no
+  row in ANY database and no canonical event.
+- **Root cause**: `scripts/test-stack.mjs` spawned services as `pnpm → tsx
+watch` trees but teardown killed only the DIRECT child (the pnpm wrapper).
+  Grandchild tsx processes survived for HOURS attached to the shared EMQX,
+  still members of the SAME `$share` command group on the dev namespace.
+  One surviving worker even pointed at `mqtt_chat_test`. EMQX round-robins
+  every `chat/v1/commands/...` message across group members, so each command
+  had ~1/N chance of being dispatched to a poison pill that rejected it
+  against the wrong database — silently (handler logs a warn, no NACK).
+  Evidence at diagnosis: 3 chat-worker sessions in `emqx ctl clients list`
+  (`chat-worker-63038-*` dev + orphans `chat-worker-31952-*` db=dev /
+  `chat-worker-31958-*` db=test); failed-run commands present in NEITHER DB;
+  `conversation.created` checks kept passing because the API writes its own
+  outbox over HTTP and never touches the worker path.
+- **Fix**:
+  1. Remediation: killed the orphan processes (verified via per-PID env:
+     DATABASE_URL/REDIS_URL/MQTT_TOPIC_NAMESPACE), after which browser E2E
+     passed twice consecutively.
+  2. Root cause in `scripts/test-stack.mjs`: services spawn `detached:true`
+     (process-group leaders); teardown signals `-pid` (whole group) with
+     SIGTERM→SIGKILL escalation. Suite children are NOT detached and are
+     signalled singly (group-signalling them would kill the orchestrator).
+- **Regression check**: full `pnpm test:e2e` run now leaks ZERO processes
+  (worker process count and EMQX client count identical before/after).
+
+# Bug #26 — Normal JPEG photos rejected ("Type image/jpg is not allowed")
+
+- **Symptom**: Mobile Alert `Unsupported image — Type image/jpg is not allowed.`
+  when picking ordinary photos (iOS PHPicker reports JPEG as `image/jpg`).
+- **Root cause**: TWO raw allowlist comparisons with NO normalization —
+  mobile `AppRoot.pickImage` (`ALLOWED_IMAGE_TYPES.includes(asset.type)`) AND
+  server `uploads.controller` (`ALLOWED_CONTENT_TYPES.includes(file.mimetype)`).
+  Platform MIME aliases (`image/jpg`, parameter suffixes, casing) died at
+  either layer. Reproduced on the isolated stack: alias upload → 400.
+- **Fix**: ONE canonical policy in `@mqtt-chat/mqtt-contracts/src/media.ts`
+  (`normalizeMediaType` / `isAllowedMediaType` / `mediaTypeFromFilename` /
+  `resolveMediaType`; aliases image/jpg|pjpeg|pipeg→image/jpeg; HEIC/HEIF
+  deliberately NOT accepted — precise product error instead). Server
+  normalizes before allowlist and stores the CANONICAL type; mobile resolves
+  picker MIME (filename-extension fallback when MIME absent) before upload;
+  document picker uses the same resolver.
+- **Regression**: contracts vitest suite (17 cases incl. alias/params/case/
+  heic/filename-fallback) + permanent `scripts/media-reply-e2e.mts`
+  uploading REAL fixture bytes (`scripts/fixtures/pixel.jpg|png`) under
+  `image/jpg` alias → 201 + canonical `image/jpeg` persisted + byte-perfect
+  /media round-trip; HEIC → 400.
+
+# Bug #27 — Reply pipeline: no Web reply UI, unfaithful retry, silent rejection
+
+- **Findings** (reproduced end-to-end on the isolated stack):
+  1. Web Composer hardcoded `replyToId: null` — replying was IMPOSSIBLE on
+     Web despite the canonical backend path being correct (valid reply →
+     `message.created` ack preserves `replyToId`).
+  2. Web retry published a BARE command — a retried reply lost its target
+     (and type/metadata were inferred from a 📎 content hack).
+  3. chat-worker rejected invalid reply targets by SILENTLY dropping the
+     command — clients waited out the 10s reconciliation timeout instead of
+     failing deterministically (#19/#21).
+- **Fix**: web reply UI (MessageBubble ↩ action → quoted preview in bubble +
+  composer banner); PendingMessage carries type/metadata so retry
+  republishes the identical logical message; NEW canonical event
+  `message.rejected { clientMessageId, reason, conversationId }` emitted by
+  the worker on every send rejection (unknown conversation, non-member,
+  deleted conversation, bad reply target) — both clients mark the pending
+  FAILED immediately on receipt.
+- **Regression**: `scripts/media-reply-e2e.mts` — base→reply lifecycle with
+  relation preserved in DB history after reload; invalid target receives
+  canonical rejection in <5s; rejected message never created.
+
+# Bug #28 — Groups had no complete lifecycle: Delete did not exist as a product capability
+
+- **Before**: `DELETE /conversations/:id` was a hard physical cascade delete
+  with NO permission check, NO canonical event, NO client surface — usable
+  only by test scripts.
+- **After (tombstone semantics, #13)**:
+  - Prisma: `Conversation.deletedAt/deletedBy` (migration
+    `20260824090000_conversation_tombstone`); history/sequence/receipts are
+    preserved — nothing physically cascades.
+  - API: admin-only (member role == ADMIN, #38) soft delete writing the row
+    AND the canonical outbox event atomically; DIRECT conversations cannot be
+    deleted (400); idempotent re-delete; tombstoned groups vanish from list/
+    detail/membership endpoints (404s) and reject new members.
+    KNOWN GAP (deliberate, follow-up): `GET /conversations/:id/messages`
+    does not yet filter `deletedAt` — history stays readable by direct id;
+    also a zero-member group hits the memberIds.min(1) zod guard on delete
+    (500) because self-leave can empty a group first.
+  - Contracts: `conversation.deleted` event carries the PRE-DELETE member
+    snapshot so every relevant client removes the entity deterministically.
+  - Worker: sends into a deleted conversation get deterministic
+    `message.rejected`.
+  - Web: DetailsPanel Danger Zone (admin-only) with two-step destructive
+    confirmation; store.removeConversation clears list/cache/pending/typing
+    and closes an open chat — no reload.
+  - Mobile: GroupDetailsScreen Danger Zone + confirmation sheet; AppRoot
+    safely exits chat/details screens when the entity disappears in realtime.
+- **Regression**: permanent `scripts/group-lifecycle-e2e.mts` — create with
+  3 runtime users → realtime discovery; non-admin delete → 403; DIRECT
+  delete → 400; admin delete → canonical tombstone to ALL members without
+  reload; fresh REST reads 404; post-delete send rejected canonically.
+
+# Bug #29 — The isolated E2E harness was silently migrating/seeding the DEV database
+
+- **Root cause**: `scripts/test-stack.mjs` `run()` expects options NESTED as
+  `{ env: {...} }`, but `migrateAndSeed()` passed `{ DATABASE_URL }` FLAT —
+  the key never reached the child process. Prisma CLI then fell back to the
+  repo `.env` → **every test:e2e run migrated+seeded `mqtt_chat` (dev)**,
+  masked by the api/workers receiving their env correctly through a properly
+  nested call. Surfaced when env-immunity hardening (#42) removed the
+  accidental fallback and prisma failed loudly with P1012.
+- **Fix**: nested `{ env: { DATABASE_URL: TEST_DB } }` at every call site;
+  PLUS env-immunity (delete inherited DATABASE_URL/REDIS_URL/
+  MQTT_TOPIC_NAMESPACE from the orchestrator's own env before spawning) and
+  a safety guard refusing TEST_DATABASE_URL values that look like the dev DB
+  unless `ALLOW_UNSAFE_TEST_DB=1`. Verified via Datasource log line: all
+  harness prisma calls now hit `mqtt_chat_test`.
