@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
 const ROOT = new URL("..", import.meta.url).pathname;
+
 const TEST_DB =
   process.env.TEST_DATABASE_URL ??
   "postgresql://mqtt:mqtt@localhost:5432/mqtt_chat_test?schema=public";
@@ -32,12 +33,20 @@ const readyPromises = new Map();
 let shuttingDown = false;
 
 function run(cmd, args, { env = {}, readyMarker = null } = {}) {
+  // detached:true makes each child a PROCESS-GROUP leader so teardown can
+  // kill the whole tree. Historical bug (#25): killing only the direct
+  // child left `pnpm → tsx watch` GRANDCHILDREN alive, silently holding
+  // broker subscriptions hours later.
   const child = spawn(cmd, args, {
     cwd: ROOT,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env },
-    detached: false,
+    detached: true,
   });
+  // Group leader: teardown may signal its whole process group. Suite
+  // processes (spawned below WITHOUT detached) share OUR group and must
+  // never be group-signalled — that would kill this orchestrator too.
+  child.__groupLeader = true;
   if (readyMarker) {
     let out = "";
     readyPromises.set(
@@ -183,15 +192,29 @@ async function teardown() {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("[test-stack] tearing down…");
-  for (const child of children.reverse()) {
-    if (child.exitCode === null && !child.killed) {
-      child.kill("SIGTERM");
+  // Service children are process-GROUP leaders (spawn detached): signal the
+  // whole group (-pid) so `pnpm → tsx watch` grandchildren die too — killing
+  // only the direct child left zombie workers holding broker subscriptions
+  // for hours (bug #25). Suite children share OUR group: signal them singly.
+  const targets = children.reverse().filter((c) => c.exitCode === null && !c.killed);
+  for (const child of targets) {
+    try {
+      if (child.__groupLeader && child.pid) process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch {
+      /* already gone */
     }
   }
   // Give processes a moment, then force.
   await delay(1500);
-  for (const child of children) {
-    if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
+  for (const child of targets) {
+    if (child.exitCode !== null || child.killed) continue;
+    try {
+      if (child.__groupLeader && child.pid) process.kill(-child.pid, "SIGKILL");
+      else child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
   }
 }
 
