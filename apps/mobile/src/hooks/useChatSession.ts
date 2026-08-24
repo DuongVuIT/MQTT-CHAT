@@ -206,6 +206,19 @@ export function useChatSession(identity: Identity | null) {
           });
           break;
         }
+        case 'message.rejected': {
+          // Authority rejected the send — fail the pending entry NOW
+          // (deterministic, repair-log #27), never wait out the timeout.
+          const rejectedCmid =
+            typeof data['clientMessageId'] === 'string'
+              ? data['clientMessageId']
+              : '';
+          if (rejectedCmid) {
+            lifecycleRef.current?.markFailed(rejectedCmid);
+            refreshPending();
+          }
+          break;
+        }
         case 'reaction.added':
         case 'reaction.removed': {
           // Canonical reactions from ANY client (web included) land here in
