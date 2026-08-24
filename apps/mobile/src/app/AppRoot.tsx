@@ -349,6 +349,13 @@ export function AppRoot() {
         typingUsers={session.typingByConv[route.conversationId] ?? []}
         identityUserId={identity.userId}
         isGroup={route.isGroup}
+        hasMoreHistory={session.hasMoreByConv[route.conversationId] ?? false}
+        loadingEarlier={
+          session.loadingEarlierByConv[route.conversationId] ?? false
+        }
+        onLoadEarlier={() => {
+          void session.loadOlderMessages(route.conversationId);
+        }}
         actions={{
           send: (content, replyToId) => {
             void session.sendMessage(route.conversationId, content, replyToId);

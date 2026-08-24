@@ -44,6 +44,12 @@ export function useChatSession(identity: Identity | null) {
     {},
   );
   const [presence, setPresence] = useState<Record<string, boolean>>({});
+  const [hasMoreByConv, setHasMoreByConv] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [loadingEarlierByConv, setLoadingEarlierByConv] = useState<
+    Record<string, boolean>
+  >({});
   const [error, setError] = useState<string | null>(null);
 
   const clientRef = useRef<ChatRealtimeClient | null>(null);
@@ -307,6 +313,10 @@ export function useChatSession(identity: Identity | null) {
           ...prev,
           [conversationId]: res.messages,
         }));
+        setHasMoreByConv(prev => ({
+          ...prev,
+          [conversationId]: res.hasMore,
+        }));
         const lastSeq = res.messages[res.messages.length - 1]?.sequence ?? 0;
         if (lastSeq > 0 && identity) {
           // Best-effort: drop silently when MQTT is down (no unhandled
@@ -318,6 +328,36 @@ export function useChatSession(identity: Identity | null) {
       }
     },
     [identity],
+  );
+
+  /** Load one older page (cursor = oldest loaded sequence) and PREPEND it. */
+  const loadOlderMessages = useCallback(
+    async (conversationId: string) => {
+      const existing = messagesByConv[conversationId] ?? [];
+      const oldest = existing[0];
+      if (!oldest || !hasMoreByConv[conversationId]) return;
+      if (loadingEarlierByConv[conversationId]) return;
+      setLoadingEarlierByConv(prev => ({ ...prev, [conversationId]: true }));
+      try {
+        const res = await api.getMessages(conversationId, {
+          before: oldest.sequence,
+        });
+        lifecycleRef.current?.applyHistory(res.messages);
+        setMessagesByConv(prev => {
+          const list = prev[conversationId] ?? [];
+          const known = new Set(list.map(m => m.id));
+          const merged = [...res.messages.filter(m => !known.has(m.id)), ...list];
+          merged.sort((a, b) => a.sequence - b.sequence);
+          return { ...prev, [conversationId]: merged };
+        });
+        setHasMoreByConv(prev => ({ ...prev, [conversationId]: res.hasMore }));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'history load failed');
+      } finally {
+        setLoadingEarlierByConv(prev => ({ ...prev, [conversationId]: false }));
+      }
+    },
+    [messagesByConv, hasMoreByConv, loadingEarlierByConv],
   );
 
   const sendMessage = useCallback(
@@ -493,6 +533,9 @@ export function useChatSession(identity: Identity | null) {
       pendingByConv,
       typingByConv,
       presence,
+      hasMoreByConv,
+      loadingEarlierByConv,
+      loadOlderMessages,
       error,
       openConversation,
       sendMessage,
@@ -514,6 +557,9 @@ export function useChatSession(identity: Identity | null) {
       pendingByConv,
       typingByConv,
       presence,
+      hasMoreByConv,
+      loadingEarlierByConv,
+      loadOlderMessages,
       error,
       openConversation,
       sendMessage,

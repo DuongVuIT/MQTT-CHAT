@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -80,6 +81,9 @@ export function ChatScreen({
   typingUsers,
   identityUserId,
   isGroup,
+  hasMoreHistory = false,
+  loadingEarlier = false,
+  onLoadEarlier,
   actions,
   onSend,
   onRetry,
@@ -94,6 +98,11 @@ export function ChatScreen({
   typingUsers: string[];
   identityUserId: string | null;
   isGroup: boolean;
+  /** Older history exists for this conversation (cursor pagination). */
+  hasMoreHistory?: boolean;
+  loadingEarlier?: boolean;
+  /** Fetch one older page — triggered by scrolling near the TOP. */
+  onLoadEarlier?: () => void;
   actions: ChatActions;
   onSend: (content: string, replyToId: string | null) => void;
   onRetry: (clientMessageId: string) => void;
@@ -107,18 +116,92 @@ export function ChatScreen({
   const [menuFor, setMenuFor] = useState<ApiMessage | null>(null);
   const [reactingFor, setReactingFor] = useState<ApiMessage | null>(null);
   const [attachSheet, setAttachSheet] = useState(false);
+  // New-message counter while the reader is scrolled away from the bottom.
+  const [newCount, setNewCount] = useState(0);
   const listRef = useRef<FlatList<ApiMessage>>(null);
   const insets = useSafeAreaInsets();
 
+  // ---- Canonical scroll model --------------------------------------------
+  // stick-to-bottom is a REF updated by every scroll event — never inferred
+  // from message counts. Appends follow ONLY when pinned; otherwise they
+  // increment `newCount` (pill). Own sends always jump. Opening lands on the
+  // latest message instantly.
+  const pinnedRef = useRef(true);
+  const listHeightRef = useRef(0);
+  const prevIdsRef = useRef({ first: '', last: '', count: 0 });
+  const initialJumpRef = useRef(true);
+  const pendingCountRef = useRef(pending.length);
+
+  const jumpToBottom = (animated: boolean): void => {
+    requestAnimationFrame(() => {
+      if (!listRef.current) return;
+      listRef.current.scrollToEnd({ animated });
+    });
+  };
+
   useEffect(() => {
-    if (messages.length > 0) {
-      // scroll to newest (timer cleaned up on unmount — no post-teardown ticks)
-      const timer = setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      }, 50);
-      return () => clearTimeout(timer);
+    if (messages.length === 0) return;
+    const first = messages[0]?.id ?? '';
+    const last = messages[messages.length - 1]?.id ?? '';
+    const prev = prevIdsRef.current;
+    const isInitial = initialJumpRef.current || prev.last === '';
+    const isPrepend = !isInitial && last === prev.last && first !== prev.first;
+    const isAppend = !isInitial && !isPrepend && last !== prev.last;
+
+    if (isInitial) {
+      // Open/history-replace → land on the newest message, no animation.
+      pinnedRef.current = true;
+      setNewCount(0);
+      initialJumpRef.current = false;
+      jumpToBottom(false);
+    } else if (isPrepend) {
+      // Older page prepended above: maintainVisibleContentPosition keeps the
+      // reading anchor stable — do nothing.
+    } else if (isAppend) {
+      if (pinnedRef.current) {
+        jumpToBottom(false);
+      } else {
+        setNewCount(c => c + Math.max(1, messages.length - prev.count));
+      }
     }
-  }, [messages.length, pending.length]);
+    prevIdsRef.current = { first, last, count: messages.length };
+  }, [messages]);
+
+  // Own sends ALWAYS reach the newest message, even from scrolled-away state.
+  useEffect(() => {
+    const grew = pending.length > pendingCountRef.current;
+    pendingCountRef.current = pending.length;
+    if (!grew || pending.length === 0) return;
+    pinnedRef.current = true;
+    setNewCount(0);
+    jumpToBottom(true);
+  }, [pending.length]);
+
+  const handleScroll = ({
+    nativeEvent: e,
+  }: {
+    nativeEvent: { contentOffset: { y: number }; contentSize: { height: number } };
+  }): void => {
+    const distanceFromBottom =
+      e.contentSize.height - e.contentOffset.y - listHeightRef.current;
+    pinnedRef.current = distanceFromBottom < 80;
+    if (pinnedRef.current && newCount > 0) setNewCount(0);
+    // Top sentinel = oldest end (data is ascending): fetch one older page.
+    if (
+      e.contentOffset.y < 120 &&
+      hasMoreHistory &&
+      !loadingEarlier &&
+      onLoadEarlier
+    ) {
+      onLoadEarlier();
+    }
+  };
+
+  const goToLatest = (): void => {
+    pinnedRef.current = true;
+    setNewCount(0);
+    jumpToBottom(true);
+  };
 
   const handleDraft = (text: string): void => {
     setDraft(text);
@@ -179,6 +262,25 @@ export function ChatScreen({
         data={messages}
         keyExtractor={m => m.id}
         contentContainerStyle={{ paddingVertical: 8 }}
+        onScroll={handleScroll}
+        scrollEventThrottle={32}
+        onLayout={e => {
+          listHeightRef.current = e.nativeEvent.layout.height;
+        }}
+        // Keeps the reading anchor stable when an older page is prepended
+        // above — without it FlatList jumps to compensate for content growth.
+        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+        ListHeaderComponent={
+          loadingEarlier ? (
+            <View style={styles.earlierLoader}>
+              <ActivityIndicator size="small" />
+            </View>
+          ) : undefined
+        }
+        ListEmptyComponent={
+          <Text style={styles.emptyChat}>No messages yet{'\n'}Say hello 👋</Text>
+        }
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item, index }) => {
           const mine = item.senderId === identityUserId; // perspective by runtime id
           const prev = index > 0 ? messages[index - 1] : null;
@@ -363,6 +465,16 @@ export function ChatScreen({
               <Text style={styles.bannerClose}>✕</Text>
             </Pressable>
           </View>
+        )}
+        {newCount > 0 && (
+          <Pressable
+            style={styles.newPill}
+            onPress={goToLatest}
+            accessibilityRole="button"
+            accessibilityLabel={`Jump to ${newCount} new messages`}
+          >
+            <Text style={styles.newPillText}>↓ {newCount} new message{newCount === 1 ? '' : 's'}</Text>
+          </Pressable>
         )}
         <View style={styles.composerRow}>
           <Pressable
@@ -677,6 +789,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendText: { color: '#fff', fontSize: 17 },
+  // Unread new-message pill (above composer) + history loader + empty state.
+  newPill: {
+    alignSelf: 'center',
+    backgroundColor: '#4f46e5',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 6,
+  },
+  newPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  earlierLoader: { paddingVertical: 10 },
+  emptyChat: {
+    color: '#94a3b8',
+    textAlign: 'center',
+    marginTop: 48,
+    lineHeight: 20,
+  },
   // Attachment chooser sheet (#58)
   sheetBackdrop: {
     flex: 1,

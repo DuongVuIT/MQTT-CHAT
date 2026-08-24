@@ -69,10 +69,18 @@ export const api = {
     request<{ conversations: ApiConversation[] }>(
       `/conversations${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`,
     ).then(r => r.conversations),
-  getMessages: (conversationId: string, limit = 50) =>
-    request<{ messages: ApiMessage[]; hasMore: boolean }>(
-      `/conversations/${encodeURIComponent(conversationId)}/messages?limit=${limit}`,
-    ),
+  getMessages: (
+    conversationId: string,
+    opts?: { limit?: number; before?: number },
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.before) params.set('before', String(opts.before));
+    const qs = params.toString();
+    return request<{ messages: ApiMessage[]; hasMore: boolean }>(
+      `/conversations/${encodeURIComponent(conversationId)}/messages${qs ? `?${qs}` : ''}`,
+    );
+  },
   getPresence: (userIds: string[]) =>
     request<{
       presence: Record<string, { online: boolean; connectionCount: number }>;
