@@ -146,7 +146,6 @@ export function MessageList({
     prevLastIdRef.current = lastId;
     prevCountRef.current = count;
     lastConvIdRef.current = conversationId;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, conversationId]);
 
   // Own sends ALWAYS reach the latest message — even if the user had scrolled

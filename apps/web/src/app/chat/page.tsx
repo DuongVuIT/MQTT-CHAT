@@ -122,8 +122,6 @@ export default function ChatPage() {
           .setError(error instanceof Error ? error.message : "Failed to initialize");
       }
     })();
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once
   }, [router]);
 
   // Peer-relative DIRECT label: A sees B's name, B sees A's name.

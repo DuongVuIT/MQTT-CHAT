@@ -4,12 +4,7 @@ import {
   type RealtimeEvent,
   type RealtimeIdentity,
 } from "@mqtt-chat/realtime-core";
-import {
-  COMMAND_TOPICS,
-  EVENT_TOPICS,
-  MQTT_QOS,
-  type EventEnvelope,
-} from "@mqtt-chat/mqtt-contracts";
+import { COMMAND_TOPICS, MQTT_QOS, type EventEnvelope } from "@mqtt-chat/mqtt-contracts";
 
 /**
  * Web realtime service — thin wrapper around the shared
