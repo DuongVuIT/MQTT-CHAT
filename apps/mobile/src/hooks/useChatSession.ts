@@ -5,6 +5,7 @@ import {
   type ConnectionStatus,
   type RealtimeEvent,
 } from '@mqtt-chat/realtime-core';
+import { COMMAND_TOPICS } from '@mqtt-chat/mqtt-contracts';
 import {
   applyConversationEvent,
   applyMessageActivity,
@@ -310,7 +311,31 @@ export function useChatSession(identity: Identity | null) {
     const client = new ChatRealtimeClient({
       url: MQTT_WS_URL,
       identity,
+      // LWT: the broker publishes an offline command if the connection dies
+      // uncleanly — parity with web (mobile identities must not linger as
+      // online forever after a crash/kill).
+      will: {
+        topic: COMMAND_TOPICS.presenceSet,
+        payload: JSON.stringify({
+          requestId:
+            globalThis.crypto?.randomUUID?.() ??
+            `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          commandType: 'presence.set',
+          version: 1,
+          timestamp: new Date().toISOString(),
+          actor: { userId: identity.userId, deviceId: identity.deviceId },
+          data: { isOnline: false },
+        }),
+        qos: 1,
+      },
       onStatus: setStatus,
+      // Announce presence after every (re)connect — otherwise this device
+      // never appears online to peers (web does the same in its shell).
+      onConnect: () => {
+        void client.setPresence(true).catch(() => {
+          /* transient — next reconnect retries */
+        });
+      },
       onEvent: handleEvent,
     });
     clientRef.current = client;
@@ -319,7 +344,11 @@ export function useChatSession(identity: Identity | null) {
     });
 
     return () => {
-      void client.disconnect();
+      // Graceful teardown announces offline before the socket closes.
+      void client
+        .setPresence(false)
+        .catch(() => {})
+        .finally(() => client.disconnect());
       clientRef.current = null;
     };
   }, [identity, refreshPending]);
