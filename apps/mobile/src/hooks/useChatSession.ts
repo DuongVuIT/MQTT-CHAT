@@ -8,6 +8,7 @@ import {
 import {
   applyConversationEvent,
   applyMessageActivity,
+  applyReactionEvent,
   type ConversationEventTypeName,
 } from '../features/conversations/conversation-events';
 import {
@@ -199,6 +200,23 @@ export function useChatSession(identity: Identity | null) {
                 m.id === messageId
                   ? { ...m, deletedAt: new Date().toISOString() }
                   : m,
+              );
+            }
+            return out;
+          });
+          break;
+        }
+        case 'reaction.added':
+        case 'reaction.removed': {
+          // Canonical reactions from ANY client (web included) land here in
+          // realtime. Pure reducer — authoritative + QoS1-idempotent.
+          setMessagesByConv(prev => {
+            const out: typeof prev = {};
+            for (const [cid, list] of Object.entries(prev)) {
+              out[cid] = applyReactionEvent(
+                list,
+                ev.eventType as 'reaction.added' | 'reaction.removed',
+                data,
               );
             }
             return out;

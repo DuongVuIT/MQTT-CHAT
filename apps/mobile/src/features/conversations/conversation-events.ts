@@ -12,7 +12,7 @@
  */
 
 import { normalizeConversation } from '@mqtt-chat/realtime-core';
-import type { ApiConversation } from '../../lib/api';
+import type { ApiConversation, ApiMessage } from '../../lib/api';
 
 export type ConversationEventTypeName =
   | 'conversation.created'
@@ -114,4 +114,46 @@ export function sortByActivity(list: ApiConversation[]): ApiConversation[] {
     const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
     return tb - ta;
   });
+}
+
+export type MessageReactionEventTypeName =
+  'reaction.added' | 'reaction.removed';
+
+/**
+ * Apply a canonical reaction event to ONE conversation's message list.
+ *
+ * Authoritative by event type and idempotent under QoS1 redelivery: the
+ * list is driven to the target state (present for added, absent for
+ * removed) — re-applying the same event is a no-op. A blind toggle would
+ * flip-flop on redeliveries. Malformed payloads never mutate the list.
+ */
+export function applyReactionEvent(
+  list: ApiMessage[],
+  eventType: MessageReactionEventTypeName,
+  data: unknown,
+): ApiMessage[] {
+  const d = (data ?? {}) as Record<string, unknown>;
+  const messageId = typeof d['messageId'] === 'string' ? d['messageId'] : '';
+  const emoji = typeof d['emoji'] === 'string' ? d['emoji'] : '';
+  const userId = typeof d['userId'] === 'string' ? d['userId'] : '';
+  if (!messageId || !emoji || !userId) return list;
+
+  const wantPresent = eventType === 'reaction.added';
+  let changed = false;
+  const next = list.map(m => {
+    if (m.id !== messageId) return m;
+    const reactions = m.reactions ?? [];
+    const exists = reactions.some(
+      r => r.emoji === emoji && r.userId === userId,
+    );
+    if (exists === wantPresent) return m; // already in the target state
+    changed = true;
+    return {
+      ...m,
+      reactions: wantPresent
+        ? [...reactions, { emoji, userId }]
+        : reactions.filter(r => !(r.emoji === emoji && r.userId === userId)),
+    };
+  });
+  return changed ? next : list;
 }

@@ -1,15 +1,20 @@
 import {
   applyConversationEvent,
   applyMessageActivity,
+  applyReactionEvent,
   sortByActivity,
 } from '../conversation-events';
-import type { ApiConversation } from '../../../lib/api';
+import type { ApiConversation, ApiMessage } from '../../../lib/api';
 
 /**
  * Regression (P0 GROUP WEB -> MOBILE DISCOVERY): groups created on Web MUST
  * appear in the Mobile list in realtime, WITHOUT an app reload. The mobile
  * realtime handler previously had NO cases for conversation lifecycle
  * events, so canonical events were dropped on the floor.
+ *
+ * applyReactionEvent covers the sibling parity gap (repair-log #24): the
+ * mobile handler also dropped canonical reaction.added / reaction.removed,
+ * so reactions made on Web never reached Mobile in realtime.
  */
 
 const conv = (
@@ -186,5 +191,87 @@ describe('applyMessageActivity — list reacts to new messages', () => {
       conv('recent', { lastMessageAt: '2026-08-24T00:00:00.000Z' }),
     ]);
     expect(sorted.map(c => c.id)).toEqual(['recent', 'no-messages']);
+  });
+});
+
+describe('applyReactionEvent — cross-client reactions in realtime', () => {
+  const msg = (
+    id: string,
+    reactions: ApiMessage['reactions'] = [],
+  ): ApiMessage => ({
+    id,
+    clientMessageId: `cmid-${id}`,
+    conversationId: 'g1',
+    senderId: 'user-peer',
+    senderType: 'USER',
+    senderName: 'Peer',
+    sequence: 1,
+    type: 'TEXT',
+    content: `content-${id}`,
+    replyToId: null,
+    metadata: null,
+    reactions,
+    createdAt: '2026-08-24T00:00:00.000Z',
+    editedAt: null,
+    deletedAt: null,
+  });
+  const reactionData = {
+    messageId: 'm1',
+    conversationId: 'g1',
+    userId: 'user-web',
+    emoji: '👍',
+  };
+
+  it('reaction.added from ANOTHER client renders immediately (parity with Web)', () => {
+    const next = applyReactionEvent(
+      [msg('m1')],
+      'reaction.added',
+      reactionData,
+    );
+    expect(next[0].reactions).toEqual([{ emoji: '👍', userId: 'user-web' }]);
+  });
+
+  it('reaction.removed removes exactly that (emoji, userId) pair', () => {
+    const seeded = [
+      msg('m1', [
+        { emoji: '👍', userId: 'user-web' },
+        { emoji: '❤️', userId: 'user-other' },
+      ]),
+    ];
+    const next = applyReactionEvent(seeded, 'reaction.removed', reactionData);
+    expect(next[0].reactions).toEqual([{ emoji: '❤️', userId: 'user-other' }]);
+  });
+
+  it('QoS1 redelivery is a no-op (never flips state like a blind toggle)', () => {
+    let list = [msg('m1')];
+    list = applyReactionEvent(list, 'reaction.added', reactionData);
+    const once = applyReactionEvent(list, 'reaction.added', reactionData);
+    expect(once).toBe(list); // same reference — nothing changed
+    let removed = applyReactionEvent(list, 'reaction.removed', reactionData);
+    removed = applyReactionEvent(removed, 'reaction.removed', reactionData);
+    expect(removed[0].reactions).toEqual([]);
+  });
+
+  it('malformed payloads never mutate the list', () => {
+    const list = [msg('m1')];
+    for (const bad of [
+      {},
+      { messageId: 'm1' },
+      { messageId: 'm1', emoji: '', userId: 'u' },
+      { messageId: 'm1', emoji: 7, userId: 'u' },
+      null,
+    ]) {
+      expect(applyReactionEvent(list, 'reaction.added', bad)).toBe(list);
+    }
+  });
+
+  it('unknown message or other conversations are left untouched', () => {
+    const list = [msg('m2')];
+    expect(
+      applyReactionEvent(list, 'reaction.added', {
+        ...reactionData,
+        messageId: 'missing',
+      }),
+    ).toBe(list);
   });
 });
