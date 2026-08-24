@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { MessageList } from "@/components/MessageList";
 import { Composer } from "@/components/Composer";
 import { DetailsPanel } from "@/components/DetailsPanel";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { ConnectionBadge } from "@mqtt-chat/ui";
 import type { EventEnvelope } from "@mqtt-chat/mqtt-contracts";
@@ -136,7 +137,7 @@ export default function ChatPage() {
   })();
 
   return (
-    <div className="flex h-screen">
+    <div className="relative flex h-screen">
       <Sidebar />
       <main className="flex min-w-0 flex-1 flex-col">
         {activeConversation ? (
@@ -167,6 +168,7 @@ export default function ChatPage() {
       </main>
       <DetailsPanel conversation={activeConversation} />
       <DiagnosticsPanel />
+      <ErrorBanner />
     </div>
   );
 }

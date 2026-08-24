@@ -21,6 +21,11 @@ import {
 import { MQTT_WS_URL } from '../lib/config';
 import { MessageLifecycleStore } from '../features/messaging/message-lifecycle';
 
+// Typing throttle (#192, parity with web Composer): ≥1s between `started`
+// publishes per conversation; silence ⇒ deterministic auto-stop after 2s.
+const TYPING_THROTTLE_MS = 1000;
+const TYPING_AUTOSTOP_MS = 2000;
+
 export interface Identity {
   userId: string;
   deviceId: string;
@@ -54,6 +59,12 @@ export function useChatSession(identity: Identity | null) {
   const [error, setError] = useState<string | null>(null);
 
   const clientRef = useRef<ChatRealtimeClient | null>(null);
+  // Typing throttle state (#192): per-conversation last `started` publish and
+  // the pending auto-stop timer.
+  const typingLastSentRef = useRef(new Map<string, number>());
+  const typingStopTimersRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
   const lifecycleRef = useRef<MessageLifecycleStore | null>(null);
 
   // Latest-conversations mirror: lets callbacks that only need to ENUMERATE
@@ -524,8 +535,46 @@ export function useChatSession(identity: Identity | null) {
 
   const sendTyping = useCallback(
     (conversationId: string, isTyping: boolean) => {
-      // Ephemeral signal — safe to drop when disconnected.
-      clientRef.current?.setTyping(conversationId, isTyping).catch(() => {});
+      // Ephemeral signal — safe to drop when disconnected. THROTTLED (#192,
+      // parity with web): every keystroke used to publish its own QoS1
+      // command with no auto-stop, spamming the broker/worker. Now at most
+      // one `started` per second per conversation, a deterministic `stopped`
+      // after 2s of silence, and immediate stop on submit/blur.
+      const client = clientRef.current;
+      if (!client) return;
+      const timers = typingStopTimersRef.current;
+      const lastSentAt = typingLastSentRef.current;
+
+      const armAutoStop = () => {
+        const existing = timers.get(conversationId);
+        if (existing) clearTimeout(existing);
+        timers.set(
+          conversationId,
+          setTimeout(() => {
+            timers.delete(conversationId);
+            lastSentAt.delete(conversationId);
+            clientRef.current?.setTyping(conversationId, false).catch(() => {});
+          }, TYPING_AUTOSTOP_MS),
+        );
+      };
+
+      if (!isTyping) {
+        const pending = timers.get(conversationId);
+        if (pending) clearTimeout(pending);
+        timers.delete(conversationId);
+        if (!lastSentAt.has(conversationId)) return;
+        lastSentAt.delete(conversationId);
+        client.setTyping(conversationId, false).catch(() => {});
+        return;
+      }
+
+      const now = Date.now();
+      const last = lastSentAt.get(conversationId) ?? 0;
+      if (now - last >= TYPING_THROTTLE_MS) {
+        lastSentAt.set(conversationId, now);
+        client.setTyping(conversationId, true).catch(() => {});
+      }
+      armAutoStop();
     },
     [],
   );
