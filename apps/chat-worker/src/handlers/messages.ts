@@ -1,4 +1,5 @@
 import { Prisma, toPrismaJson } from "@mqtt-chat/database";
+import { publishJson } from "@mqtt-chat/mqtt";
 import {
   buildEventEnvelope,
   EVENT_TOPICS,
@@ -8,6 +9,7 @@ import {
   type EditMessageCommand,
   type DeleteMessageCommand,
   type MessageEventData,
+  type MessageRejectedData,
 } from "@mqtt-chat/mqtt-contracts";
 import type { Message } from "@mqtt-chat/database";
 import type { WorkerContext } from "../context";
@@ -44,6 +46,36 @@ export function toMessageEventData(message: Message): MessageEventData {
   };
 }
 
+/**
+ * Announce a command-level rejection to the ORIGINATING client so its
+ * optimistic entry fails deterministically (repair-log #27) instead of
+ * waiting out the reconciliation timeout. Best-effort QoS1 publish.
+ */
+function rejectSend(
+  ctx: WorkerContext,
+  envelope: CommandEnvelope<SendMessageCommand>,
+  reason: string,
+): void {
+  const event = buildEventEnvelope<MessageRejectedData>({
+    eventType: "message.rejected",
+    origin: { type: "system", id: "chat-worker" },
+    actor: envelope.actor,
+    conversationId: envelope.data.conversationId,
+    correlationId: envelope.requestId,
+    data: {
+      clientMessageId: envelope.data.clientMessageId,
+      reason,
+      conversationId: envelope.data.conversationId,
+    },
+  });
+  void publishJson(ctx.mqtt, EVENT_TOPICS.messageRejected, event, 1);
+  ctx.log.warn("message.send rejected", {
+    requestId: envelope.requestId,
+    reason,
+    clientMessageId: envelope.data.clientMessageId,
+  });
+}
+
 export async function handleMessageSend(
   ctx: WorkerContext,
   envelope: CommandEnvelope<SendMessageCommand>,
@@ -51,7 +83,7 @@ export async function handleMessageSend(
   const data = envelope.data;
   const userId = envelope.actor.userId;
   if (!userId) {
-    ctx.log.warn("message.send rejected: missing actor userId", { requestId: envelope.requestId });
+    rejectSend(ctx, envelope, "missing actor userId");
     return;
   }
 
@@ -60,21 +92,16 @@ export async function handleMessageSend(
     where: { conversationId_userId: { conversationId: data.conversationId, userId } },
   });
   if (!membership) {
-    ctx.log.warn("message.send rejected: not a member", {
-      requestId: envelope.requestId,
-      userId,
-      conversationId: data.conversationId,
-    });
+    rejectSend(ctx, envelope, "sender is not a member of this conversation");
     return;
   }
 
+  // Reply target validation (#19): must exist and belong to the SAME
+  // conversation — otherwise the send is rejected deterministically.
   if (data.replyToId) {
     const replyTo = await ctx.db.message.findUnique({ where: { id: data.replyToId } });
     if (!replyTo || replyTo.conversationId !== data.conversationId) {
-      ctx.log.warn("message.send rejected: invalid replyToId", {
-        requestId: envelope.requestId,
-        replyToId: data.replyToId,
-      });
+      rejectSend(ctx, envelope, `invalid reply target ${data.replyToId}`);
       return;
     }
   }
@@ -167,6 +194,10 @@ export async function handleMessageSend(
         });
         return;
       }
+    }
+    if (error instanceof Error && error.message.startsWith("Conversation not found")) {
+      rejectSend(ctx, envelope, "unknown conversation");
+      return;
     }
     throw error;
   }
