@@ -317,7 +317,7 @@ describe("chat-store identity switch + normalized state", () => {
 });
 
 describe("chat-store reaction contract defense", () => {
-  it("toggleReaction on a malformed message without reactions array does not crash", () => {
+  it("applyReaction on a malformed message without reactions array does not crash", () => {
     useChatStore.setState({ messagesByConversation: {}, pendingMessages: [] });
     const malformed = {
       ...sampleMessage("m-bad", "cmid-bad"),
@@ -325,14 +325,40 @@ describe("chat-store reaction contract defense", () => {
     };
     useChatStore.getState().upsertMessage(malformed);
     expect(() => {
-      useChatStore.getState().toggleReaction("m-bad", "👍", "duong");
+      useChatStore.getState().applyReaction("m-bad", "👍", "duong", true);
     }).not.toThrow();
-    // After the toggle the invariant is restored: reactions is a valid array.
+    // After the apply the invariant is restored: reactions is a valid array.
     const stored = useChatStore
       .getState()
       .messagesByConversation["conv-general"]?.find((m) => m.id === "m-bad");
     expect(Array.isArray(stored?.reactions)).toBe(true);
     expect(stored?.reactions).toEqual([{ emoji: "👍", userId: "duong" }]);
+  });
+
+  it("applyReaction is idempotent under QoS1 redelivery (no toggle flip-flop)", () => {
+    useChatStore.setState({ messagesByConversation: {}, pendingMessages: [] });
+    useChatStore.getState().setMessages("conv-x", [sampleMessage("m1", "c1")], false);
+
+    const reaction = () =>
+      (useChatStore.getState().messagesByConversation["conv-x"] ?? []).find(
+        (m) => m.id === "m1",
+      )?.reactions;
+
+    // First added → present. A REDELIVERED added must stay present.
+    useChatStore.getState().applyReaction("m1", "❤️", "alice", true, "conv-x");
+    expect(reaction()).toEqual([{ emoji: "❤️", userId: "alice" }]);
+    useChatStore.getState().applyReaction("m1", "❤️", "alice", true, "conv-x");
+    expect(reaction()).toEqual([{ emoji: "❤️", userId: "alice" }]);
+
+    // removed → absent. A REDELIVERED removed must stay absent.
+    useChatStore.getState().applyReaction("m1", "❤️", "alice", false, "conv-x");
+    expect(reaction()).toEqual([]);
+    useChatStore.getState().applyReaction("m1", "❤️", "alice", false, "conv-x");
+    expect(reaction()).toEqual([]);
+
+    // A stale duplicate of the OLD event must not resurrect the reaction.
+    useChatStore.getState().applyReaction("m1", "❤️", "alice", false, "conv-x");
+    expect(reaction()).toEqual([]);
   });
 
   it("history + realtime merge keeps ONE canonical message with valid reactions", () => {

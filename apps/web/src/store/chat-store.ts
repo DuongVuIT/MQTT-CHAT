@@ -73,10 +73,16 @@ export interface ChatState {
   retryPending: (clientMessageId: string) => void;
   updateMessage: (messageId: string, patch: Partial<ApiMessage>, conversationId?: string) => void;
   removeMessage: (messageId: string, conversationId?: string) => void;
-  toggleReaction: (
+  /**
+   * Apply a canonical reaction.added / reaction.removed event AUTHORITATIVELY:
+   * the event type names the target state, so a QoS1 redelivery is a no-op —
+   * never a flip (repair-log #31).
+   */
+  applyReaction: (
     messageId: string,
     emoji: string,
     userId: string,
+    present: boolean,
     conversationId?: string,
   ) => void;
   setTyping: (conversationId: string, userId: string, isTyping: boolean) => void;
@@ -91,39 +97,59 @@ export interface ChatState {
 const sortMessages = (messages: ApiMessage[]): ApiMessage[] =>
   [...messages].sort((a, b) => a.sequence - b.sequence);
 
-/** Reaction toggle for ONE message list — shared by both toggle paths. */
-function applyToggleList(
+/**
+ * Authoritative reaction state for ONE message list. The canonical event type
+ * names the TARGET STATE (added ⇒ present, removed ⇒ absent), so applying the
+ * same event twice is a no-op — QoS1 redelivery must never flip state.
+ */
+function applyReactionPresenceList(
   list: ApiMessage[],
   messageId: string,
   emoji: string,
   userId: string,
+  present: boolean,
 ): ApiMessage[] {
   return list.map((m) => {
     if (m.id !== messageId) return m;
     // Defensive: reactions is contractually an array, but a malformed
     // row must not crash the whole store update.
     const reactions = m.reactions ?? [];
-    const existing = reactions.find((r) => r.emoji === emoji && r.userId === userId);
+    const exists = reactions.some((r) => r.emoji === emoji && r.userId === userId);
+    if (exists === present) return m; // already in target state — idempotent
     return {
       ...m,
-      reactions: existing
-        ? reactions.filter((r) => r !== existing)
-        : [...reactions, { emoji, userId }],
+      reactions: present
+        ? [...reactions, { emoji, userId }]
+        : reactions.filter((r) => !(r.emoji === emoji && r.userId === userId)),
     };
   });
 }
 
-function applyToggle(
+function applyReactionPresence(
   cache: Record<string, ApiMessage[]>,
-  conversationId: string,
+  conversationId: string | undefined,
   messageId: string,
   emoji: string,
   userId: string,
+  present: boolean,
 ): Record<string, ApiMessage[]> {
-  return {
-    ...cache,
-    [conversationId]: applyToggleList(cache[conversationId] ?? [], messageId, emoji, userId),
-  };
+  if (conversationId && cache[conversationId]) {
+    return {
+      ...cache,
+      [conversationId]: applyReactionPresenceList(
+        cache[conversationId],
+        messageId,
+        emoji,
+        userId,
+        present,
+      ),
+    };
+  }
+  const out: Record<string, ApiMessage[]> = {};
+  for (const [cid, list] of Object.entries(cache)) {
+    out[cid] = applyReactionPresenceList(list, messageId, emoji, userId, present);
+  }
+  return out;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -306,17 +332,16 @@ export const useChatStore = create<ChatState>((set) => ({
             ),
     })),
 
-  toggleReaction: (messageId, emoji, userId, conversationId?) =>
+  applyReaction: (messageId, emoji, userId, present, conversationId?) =>
     set((s) => ({
-      messagesByConversation:
-        conversationId && s.messagesByConversation[conversationId]
-          ? applyToggle(s.messagesByConversation, conversationId, messageId, emoji, userId)
-          : Object.fromEntries(
-              Object.entries(s.messagesByConversation).map(([cid, list]) => [
-                cid,
-                applyToggleList(list, messageId, emoji, userId),
-              ]),
-            ),
+      messagesByConversation: applyReactionPresence(
+        s.messagesByConversation,
+        conversationId,
+        messageId,
+        emoji,
+        userId,
+        present,
+      ),
     })),
 
   setTyping: (conversationId, userId, isTyping) =>

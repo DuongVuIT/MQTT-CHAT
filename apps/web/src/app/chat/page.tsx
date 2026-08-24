@@ -332,18 +332,22 @@ function handleEvent(envelope: EventEnvelope): void {
       break;
     }
     case "reaction.added":
-      s.toggleReaction(
+      // Authoritative: the event type names the target state, so a QoS1
+      // redelivery is a no-op — never a flip (repair-log #31).
+      s.applyReaction(
         String(data["messageId"]),
         String(data["emoji"]),
         String(data["userId"]),
+        true,
         conversationId || undefined,
       );
       break;
     case "reaction.removed":
-      s.toggleReaction(
+      s.applyReaction(
         String(data["messageId"]),
         String(data["emoji"]),
         String(data["userId"]),
+        false,
         conversationId || undefined,
       );
       break;
