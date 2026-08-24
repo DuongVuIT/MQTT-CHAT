@@ -275,6 +275,45 @@ export class ChatController {
         include: { members: true },
       });
       if (existing) return { conversation: existing, reused: true };
+
+      // Legacy adoption (duplicate-Alice root cause): rows created before
+      // the pair-key contract — notably the seeded demo DMs — carry a NULL
+      // key, which the UNIQUE index cannot dedupe and findUnique cannot
+      // match. Adopt such a twin instead of creating a second conversation
+      // for the same pair: stamp the canonical key and reuse the row.
+      const legacy = await this.prisma.conversation.findFirst({
+        where: {
+          type: "DIRECT",
+          directPairKey: null,
+          members: { every: { userId: { in: [a, b] } } },
+          AND: [{ members: { some: { userId: a } } }, { members: { some: { userId: b } } }],
+        },
+        include: { members: true },
+      });
+      if (legacy && legacy.members.length === 2) {
+        try {
+          const adopted = await this.prisma.conversation.update({
+            where: { id: legacy.id },
+            data: { directPairKey },
+            include: { members: true },
+          });
+          return { conversation: adopted, reused: true, adoptedLegacy: true };
+        } catch (err) {
+          // Two concurrent adoptions (or an adoption racing a create) can
+          // both pass the checks; the unique index decides — reuse winner.
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === "P2002"
+          ) {
+            const winner = await this.prisma.conversation.findUnique({
+              where: { directPairKey },
+              include: { members: true },
+            });
+            if (winner) return { conversation: winner, reused: true };
+          }
+          throw err;
+        }
+      }
     }
 
     // Create the conversation AND its canonical conversation.created outbox

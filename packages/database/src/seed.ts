@@ -3,6 +3,7 @@
  * Run: pnpm db:seed (requires PostgreSQL running via docker compose).
  */
 import { PrismaClient } from "@prisma/client";
+import { directPairKeyFor } from "./index";
 
 const prisma = new PrismaClient();
 
@@ -264,11 +265,25 @@ async function main(): Promise<void> {
 }
 
 async function ensureDirect(id: string, userA: string, userB: string): Promise<void> {
+  // Canonical pair key MUST be set at creation (duplicate-Alice root cause):
+  // a NULL key makes the row invisible to the API's reuse fast-path
+  // (NULL never matches a unique lookup), so tapping the same peer again in
+  // a picker minted a SECOND direct conversation for the same pair.
+  const directPairKey = directPairKeyFor(userA, userB);
   await prisma.conversation.upsert({
     where: { id },
     update: {},
-    create: { id, type: "DIRECT", title: null, createdBy: userA },
+    create: { id, type: "DIRECT", title: null, createdBy: userA, directPairKey },
   });
+  // Heal legacy rows seeded before the contract existed — but only when no
+  // other row already owns the key (the UNIQUE index forbids twins).
+  const keyOwner = await prisma.conversation.findUnique({ where: { directPairKey } });
+  if (!keyOwner) {
+    await prisma.conversation.updateMany({
+      where: { id, type: "DIRECT", directPairKey: null },
+      data: { directPairKey },
+    });
+  }
   for (const userId of [userA, userB]) {
     await prisma.conversationMember.upsert({
       where: { conversationId_userId: { conversationId: id, userId } },

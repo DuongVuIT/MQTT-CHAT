@@ -93,5 +93,57 @@ check(
 );
 check(rows[0]?.endsWith(pairKey), "directPairKey persisted canonically", rows[0]);
 
+// ---- Legacy adoption (duplicate-Alice root cause, phase 2) ---------------
+// A NULL-keyed DIRECT row (what the OLD seed produced) is invisible to the
+// reuse fast-path: creating the same pair again used to mint a SECOND
+// conversation. The API must ADOPT the legacy twin instead.
+const legacyUserC = { id: `e2e-uc-${suffix}`, displayName: `E2E User C ${suffix}` };
+const legacyUserD = { id: `e2e-ud-${suffix}`, displayName: `E2E User D ${suffix}` };
+for (const u of [legacyUserC, legacyUserD]) {
+  const res = await fetch(`${API}/users`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(u),
+  });
+  check(res.ok, `runtime user created ${u.id}`);
+}
+const dbForLegacy = process.env.TEST_DB_NAME ?? "mqtt_chat_test";
+const legacyId = `conv-legacy-${suffix}`;
+const legacySql = `
+INSERT INTO "Conversation" (id, type, "createdBy", "updatedAt") VALUES ('${legacyId}', 'DIRECT', '${legacyUserC.id}', now());
+INSERT INTO "ConversationMember" ("conversationId", "userId") VALUES ('${legacyId}', '${legacyUserC.id}'), ('${legacyId}', '${legacyUserD.id}');
+`;
+execFileSync("docker", ["exec", "-i", container, "psql", "-U", "mqtt", "-d", dbForLegacy, "-v", "ON_ERROR_STOP=1", "-c", legacySql], { encoding: "utf8" });
+
+const adoptRes = await fetch(`${API}/conversations`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ type: "DIRECT", createdBy: legacyUserD.id, memberIds: [legacyUserD.id, legacyUserC.id] }),
+}).then(async (r) => ({ status: r.status, json: await r.json() }));
+check(
+  (adoptRes.status === 200 || adoptRes.status === 201) && adoptRes.json?.conversation?.id,
+  "create over legacy row succeeded",
+  `status ${adoptRes.status}`,
+);
+check(adoptRes.json?.conversation?.id === legacyId, "LEGACY row was ADOPTED (same id returned)", `${adoptRes.json?.conversation?.id} vs ${legacyId}`);
+check(adoptRes.json?.reused === true, "adoption reported reused=true");
+
+const legacyPairKey = [legacyUserC.id, legacyUserD.id].sort().join(":");
+const legacyCountSql = `SELECT COUNT(DISTINCT c.id) FROM "Conversation" c
+JOIN "ConversationMember" m ON m."conversationId" = c.id
+WHERE c.type = 'DIRECT' AND (c."directPairKey" = '${legacyPairKey}' OR (c."directPairKey" IS NULL AND c.id = '${legacyId}'))
+GROUP BY c.id HAVING COUNT(*) = 2;`;
+const legacyOut = execFileSync("docker", ["exec", "-i", container, "psql", "-U", "mqtt", "-d", dbForLegacy, "-t", "-A", "-c", legacyCountSql], { encoding: "utf8" });
+const legacyRows = legacyOut.trim().split("\n").filter((l) => l.length > 0);
+check(legacyRows.length === 1, "exactly ONE direct conversation for the pair after adoption", `found ${legacyRows.length}`);
+
+// Teardown: exact IDs via psql (DIRECT rows cannot be deleted over the API
+// by design — tombstone endpoint rejects them with 400).
+const teardownSql = `
+DELETE FROM "Conversation" WHERE id IN ('${[...ids].join("', '")}', '${legacyId}');
+DELETE FROM "User" WHERE id IN ('${userA.id}', '${userB.id}', '${legacyUserC.id}', '${legacyUserD.id}');
+`;
+execFileSync("docker", ["exec", "-i", container, "psql", "-U", "mqtt", "-d", dbForLegacy, "-v", "ON_ERROR_STOP=1", "-c", teardownSql], { encoding: "utf8" });
+
 console.log(failed ? "DUPLICATE-DIRECT E2E FAILED" : "DUPLICATE-DIRECT E2E DONE");
 process.exit(failed ? 1 : 0);
