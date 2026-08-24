@@ -73,7 +73,12 @@ export interface ChatState {
   retryPending: (clientMessageId: string) => void;
   updateMessage: (messageId: string, patch: Partial<ApiMessage>, conversationId?: string) => void;
   removeMessage: (messageId: string, conversationId?: string) => void;
-  toggleReaction: (messageId: string, emoji: string, userId: string, conversationId?: string) => void;
+  toggleReaction: (
+    messageId: string,
+    emoji: string,
+    userId: string,
+    conversationId?: string,
+  ) => void;
   setTyping: (conversationId: string, userId: string, isTyping: boolean) => void;
   setPresence: (userId: string, online: boolean) => void;
   /** Update a member's read watermark; tolerates conversations missing `members`. */
@@ -286,9 +291,7 @@ export const useChatStore = create<ChatState>((set) => ({
           ? {
               ...s.messagesByConversation,
               [conversationId]: s.messagesByConversation[conversationId].map((m) =>
-                m.id === messageId
-                  ? { ...m, deletedAt: new Date().toISOString(), content: "" }
-                  : m,
+                m.id === messageId ? { ...m, deletedAt: new Date().toISOString(), content: "" } : m,
               ),
             }
           : Object.fromEntries(

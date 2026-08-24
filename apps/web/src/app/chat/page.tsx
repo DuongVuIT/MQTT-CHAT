@@ -27,8 +27,8 @@ export default function ChatPage() {
   // list, composer, details) on every typing/presence/receipt/reaction event.
   // Actions come from getState() — they are stable and never trigger renders.
   const activeId = useChatStore((s) => s.activeConversationId);
-  const activeConversation = useChatStore((s) =>
-    s.conversations.find((c) => c.id === s.activeConversationId) ?? null,
+  const activeConversation = useChatStore(
+    (s) => s.conversations.find((c) => c.id === s.activeConversationId) ?? null,
   );
   const identityUserId = useChatStore((s) => s.identity?.userId);
   const connectionState = useChatStore((s) => s.connectionState);
@@ -132,9 +132,7 @@ export default function ChatPage() {
     if (activeConversation.type === "GROUP") {
       return activeConversation.title ?? "Group";
     }
-    const peerId = activeConversation.members?.find(
-      (m) => m.userId !== identityUserId,
-    )?.userId;
+    const peerId = activeConversation.members?.find((m) => m.userId !== identityUserId)?.userId;
     const peer = users.find((u) => u.id === peerId);
     return peer?.displayName ?? peerId ?? "Direct chat";
   })();
