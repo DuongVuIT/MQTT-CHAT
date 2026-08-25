@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ChatMarkIcon, InfoIcon, MenuIcon } from "@/components/icons";
 import { api, type ApiConversation, type ApiMessage } from "@/lib/api";
 import { normalizeConversation, normalizeMessage } from "@mqtt-chat/realtime-core";
 import { getRealtimeService, type ConnectionState } from "@/lib/realtime-service";
@@ -17,39 +18,26 @@ import { DiagnosticsPanel } from "@/components/DiagnosticsPanel";
 import { Avatar, ConnectionBadge } from "@mqtt-chat/ui";
 import type { EventEnvelope } from "@mqtt-chat/mqtt-contracts";
 
-/**
- * Main chat shell v2 (§26): three-area workspace — conversations / chat /
- * details. Details is collapsible on desktop and becomes a drawer below
- * `lg`; the sidebar collapses below `md`. Connection state is a subtle dot
- * during normal operation (§29) and a labelled pill only when degraded.
- */
-
 export default function ChatPage() {
   const router = useRouter();
-  // PERF: subscribe to ONLY the slices this component renders. The old
-  // whole-store subscription re-rendered the entire 3-column shell (sidebar,
-  // list, composer, details) on every typing/presence/receipt/reaction event.
-  // Actions come from getState() — they are stable and never trigger renders.
-  const activeId = useChatStore((s) => s.activeConversationId);
+  const activeConversationId = useChatStore((state) => state.activeConversationId);
   const activeConversation = useChatStore(
-    (s) => s.conversations.find((c) => c.id === s.activeConversationId) ?? null,
+    (state) =>
+      state.conversations.find((conversation) => conversation.id === state.activeConversationId) ??
+      null,
   );
-  const identityUserId = useChatStore((s) => s.identity?.userId);
-  const users = useChatStore((s) => s.users);
-  const connectionState = useChatStore((s) => s.connectionState);
-  // Previous transport state — used to detect reconnect transitions
-  // (reconnecting/disconnected → connected) and trigger state recovery.
+  const identityUserId = useChatStore((state) => state.identity?.userId);
+  const users = useChatStore((state) => state.users);
+  const connectionState = useChatStore((state) => state.connectionState);
   const prevConnectionState = useRef<ConnectionState | null>(null);
-  // Reply target for the composer — canonical messageId of an existing message.
   const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
-  // Drawer state for narrow viewports (§26): details → overlay drawer.
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const activeConversationId = activeId;
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
-  // Switching conversations must never carry a stale reply target over.
   useEffect(() => {
     setReplyTo(null);
-    setDetailsOpen(false);
+    setIsSidebarOpen(false);
+    setIsDetailsOpen(false);
   }, [activeConversationId]);
 
   // Subscribe first, then install the REST snapshot, then replay events that
@@ -64,8 +52,12 @@ export default function ChatPage() {
     // Identity switch hygiene: if a DIFFERENT user was active in this tab,
     // drop every identity-scoped transient state before syncing new data —
     // conversations/pending/typing/presence never leak across identities.
-    const prev = useChatStore.getState().identity;
-    if (prev && (prev.userId !== identity.userId || prev.deviceId !== identity.deviceId)) {
+    const previousIdentity = useChatStore.getState().identity;
+    if (
+      previousIdentity &&
+      (previousIdentity.userId !== identity.userId ||
+        previousIdentity.deviceId !== identity.deviceId)
+    ) {
       useChatStore.getState().resetTransient();
     }
     useChatStore.getState().setIdentity(identity);
@@ -110,21 +102,23 @@ export default function ChatPage() {
         // connect() resolves only after SUBACK for canonical + user topics.
         await realtime.connect(identity);
         if (cancelled) return;
-        const [usersRes, convRes] = await Promise.all([
+        const [usersResponse, conversationsResponse] = await Promise.all([
           api.listUsers(),
           api.listConversations(identity.userId),
         ]);
         if (cancelled) return;
-        const s = useChatStore.getState();
-        s.setUsers(usersRes.users);
-        s.setConversations(convRes.conversations);
-        s.setConversationsLoaded(true);
+        const store = useChatStore.getState();
+        store.setUsers(usersResponse.users);
+        store.setConversations(conversationsResponse.conversations);
+        store.setConversationsLoaded(true);
         // Presence starts UNKNOWN for everyone — never assume offline.
         // Apply the server-authoritative snapshot once it arrives.
         try {
-          const presenceRes = await api.getPresence(usersRes.users.map((u) => u.id));
-          for (const [userId, info] of Object.entries(presenceRes.presence)) {
-            s.setPresence(userId, info.online);
+          const presenceResponse = await api.getPresence(
+            usersResponse.users.map((user) => user.id),
+          );
+          for (const [userId, presenceInfo] of Object.entries(presenceResponse.presence)) {
+            store.setPresence(userId, presenceInfo.online);
           }
         } catch {
           // Snapshot unavailable → leave presence unknown; realtime events
@@ -132,7 +126,9 @@ export default function ChatPage() {
         }
 
         realtime.subscribeGlobal(identity.userId);
-        for (const c of convRes.conversations) realtime.subscribeConversation(c.id);
+        for (const conversation of conversationsResponse.conversations) {
+          realtime.subscribeConversation(conversation.id);
+        }
         initialSnapshotReady = true;
         replayBufferedEvents();
       } catch (error) {
@@ -167,7 +163,7 @@ export default function ChatPage() {
     if (activeConversation.type === "GROUP") {
       return activeConversation.title ?? "Group";
     }
-    const peer = users.find((u) => u.id === activePeerId);
+    const peer = users.find((user) => user.id === activePeerId);
     return peer?.displayName ?? activePeerId ?? "Direct chat";
   })();
 
@@ -188,11 +184,10 @@ export default function ChatPage() {
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-app">
-      {/* Sidebar: static ≥md, drawer below (§26). */}
       <div className="hidden md:flex">
         <Sidebar />
       </div>
-      {detailsOpen && (
+      {isSidebarOpen && (
         <div
           className="absolute inset-0 z-40 flex md:hidden"
           role="dialog"
@@ -205,32 +200,43 @@ export default function ChatPage() {
             type="button"
             aria-label="Close conversations"
             className="flex-1 bg-scrim"
-            onClick={() => setDetailsOpen(false)}
+            onClick={() => setIsSidebarOpen(false)}
           />
         </div>
       )}
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="relative flex min-w-0 flex-1 flex-col bg-app/70">
         {activeConversation ? (
           <>
-            <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+            <header className="glass-surface z-20 flex min-h-16 items-center justify-between gap-3 border-b border-line px-4 md:px-6">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
                   aria-label="Open conversations"
-                  onClick={() => setDetailsOpen(true)}
-                  className="rounded-lg px-1 text-ink-2 hover:text-ink md:hidden"
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl text-ink-2 transition-colors duration-fast hover:bg-raised hover:text-ink md:hidden"
                 >
-                  ☰
+                  <MenuIcon className="h-5 w-5" />
                 </button>
-                <Avatar name={headerAvatarName} colorKey={headerAvatarKey} size="sm" />
+                <Avatar name={headerAvatarName} colorKey={headerAvatarKey} size="md" />
                 <div className="min-w-0">
-                  <h2 className="truncate text-sm font-semibold">{activeTitle}</h2>
-                  <p className="truncate text-xs text-ink-3">{activeSubtitle}</p>
+                  <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em]">
+                    {activeTitle}
+                  </h2>
+                  <p className="truncate text-xs text-ink-2">{activeSubtitle}</p>
                 </div>
               </div>
-              {/* Subtle dot when healthy; labelled pill only when degraded. */}
-              <ConnectionBadge state={connectionState} />
+              <div className="flex items-center gap-2">
+                <ConnectionBadge state={connectionState} />
+                <button
+                  type="button"
+                  aria-label="Show conversation details"
+                  onClick={() => setIsDetailsOpen(true)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-raised/70 text-ink-2 transition-colors duration-fast hover:border-brand/50 hover:bg-high hover:text-ink lg:hidden"
+                >
+                  <InfoIcon className="h-5 w-5" />
+                </button>
+              </div>
             </header>
             <MessageList conversationId={activeConversation.id} onRequestReply={setReplyTo} />
             <Composer
@@ -241,60 +247,48 @@ export default function ChatPage() {
           </>
         ) : (
           <>
-            <header className="flex items-center gap-3 border-b border-line px-4 py-2.5 md:hidden">
+            <header className="glass-surface flex min-h-16 items-center gap-3 border-b border-line px-4 md:hidden">
               <button
                 type="button"
                 aria-label="Open conversations"
-                onClick={() => setDetailsOpen(true)}
-                className="rounded-lg px-1 text-ink-2 hover:text-ink"
+                onClick={() => setIsSidebarOpen(true)}
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-ink-2 hover:bg-raised hover:text-ink"
               >
-                ☰
+                <MenuIcon className="h-5 w-5" />
               </button>
-              <h2 className="text-sm font-semibold">Chats</h2>
+              <h2 className="text-[15px] font-semibold">Messages</h2>
             </header>
-            {/* Empty state (§28) — tasteful, never an enormous blank panel. */}
             <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
-              <span
-                aria-hidden
-                className="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface text-3xl"
-              >
-                💬
+              <span className="flex h-20 w-20 items-center justify-center rounded-[24px] border border-line bg-surface text-brand-strong shadow-panel">
+                <ChatMarkIcon className="h-9 w-9" />
               </span>
-              <p className="mt-4 text-sm font-semibold">Select a conversation</p>
-              <p className="mt-1 max-w-xs text-xs leading-5 text-ink-3">
-                Pick a chat on the left, or start a new one with the + button.
+              <p className="mt-5 text-base font-semibold">Your conversations live here</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-ink-2">
+                Choose a chat from the sidebar or create a new conversation to get started.
               </p>
             </div>
           </>
         )}
       </main>
 
-      {/* Details: static rail ≥lg, drawer below (§26). */}
       <div className="hidden lg:flex">
         <DetailsPanel conversation={activeConversation} />
       </div>
-      {detailsOpen && activeConversation && (
+      {isDetailsOpen && activeConversation && (
         <div className="absolute inset-0 z-40 flex lg:hidden" role="dialog" aria-label="Details">
           <div className="flex h-full">
-            <DetailsPanel conversation={activeConversation} onClose={() => setDetailsOpen(false)} />
+            <DetailsPanel
+              conversation={activeConversation}
+              onClose={() => setIsDetailsOpen(false)}
+            />
           </div>
           <button
             type="button"
             aria-label="Close details"
             className="flex-1 bg-scrim"
-            onClick={() => setDetailsOpen(false)}
+            onClick={() => setIsDetailsOpen(false)}
           />
         </div>
-      )}
-      {activeConversation && (
-        <button
-          type="button"
-          aria-label="Show details"
-          onClick={() => setDetailsOpen(true)}
-          className="absolute right-3 top-16 z-10 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink-2 shadow-md transition-colors duration-fast hover:bg-raised lg:hidden"
-        >
-          Details
-        </button>
       )}
 
       <DiagnosticsPanel />
@@ -311,19 +305,19 @@ export default function ChatPage() {
  * metadata-less FILE bubble.
  */
 function flushQueuedMessages(): void {
-  const s = useChatStore.getState();
-  for (const p of s.pendingMessages) {
-    if (p.status !== "queued") continue;
-    s.retryPending(p.clientMessageId);
-    getRealtimeService().publishCommand("message.send", republishPayload(p));
+  const store = useChatStore.getState();
+  for (const pendingMessage of store.pendingMessages) {
+    if (pendingMessage.status !== "queued") continue;
+    store.retryPending(pendingMessage.clientMessageId);
+    getRealtimeService().publishCommand("message.send", republishPayload(pendingMessage));
   }
 }
 
 /** Route canonical events into the store. */
 function handleEvent(envelope: EventEnvelope): void {
-  const s = useChatStore.getState();
+  const store = useChatStore.getState();
   // Perspective is ALWAYS derived from the active identity at event time.
-  const selfUserId = s.identity?.userId ?? "";
+  const selfUserId = store.identity?.userId ?? "";
   const data = envelope.data as Record<string, unknown>;
   const conversationId = envelope.conversationId ?? String(data["conversationId"] ?? "");
 
@@ -339,9 +333,11 @@ function handleEvent(envelope: EventEnvelope): void {
       // payload mirrors the REST list item, so it can be inserted directly —
       // the sidebar updates immediately, no refetch, no reload.
       const rawMembers = Array.isArray(data["members"]) ? data["members"] : [];
-      const isMember = rawMembers.some((m) => (m as { userId?: unknown })["userId"] === selfUserId);
+      const isMember = rawMembers.some(
+        (member) => (member as { userId?: unknown })["userId"] === selfUserId,
+      );
       if (!isMember) break;
-      s.upsertConversation(toConversation());
+      store.upsertConversation(toConversation());
       getRealtimeService().subscribeConversation(String(data["id"]));
       break;
     }
@@ -352,11 +348,13 @@ function handleEvent(envelope: EventEnvelope): void {
       const conversation = toConversation();
       const stillMember =
         envelope.eventType === "conversation.member-joined"
-          ? conversation.members.some((m) => m.userId === selfUserId)
+          ? conversation.members.some((member) => member.userId === selfUserId)
           : // For a leave event, non-members keep nothing to update; if I was
             // the one removed, drop the entity entirely.
             String(data["removedUserId"]) !== selfUserId &&
-            useChatStore.getState().conversations.some((c) => c.id === conversation.id);
+            useChatStore
+              .getState()
+              .conversations.some((candidate) => candidate.id === conversation.id);
       if (
         envelope.eventType === "conversation.member-left" &&
         String(data["removedUserId"]) === selfUserId
@@ -364,32 +362,47 @@ function handleEvent(envelope: EventEnvelope): void {
         useChatStore
           .getState()
           .setConversations(
-            useChatStore.getState().conversations.filter((c) => c.id !== conversation.id),
+            useChatStore
+              .getState()
+              .conversations.filter((candidate) => candidate.id !== conversation.id),
           );
         break;
       }
       if (!stillMember) break;
       // Preserve locally-known preview/sequence (event payload has no message info).
-      const existingConv = useChatStore
+      const existingConversation = useChatStore
         .getState()
-        .conversations.find((c) => c.id === conversation.id);
-      s.upsertConversation({
+        .conversations.find((candidate) => candidate.id === conversation.id);
+      store.upsertConversation({
         ...conversation,
-        lastMessagePreview: existingConv?.lastMessagePreview ?? conversation.lastMessagePreview,
-        lastMessageAt: existingConv?.lastMessageAt ?? conversation.lastMessageAt,
-        lastSequence: Math.max(existingConv?.lastSequence ?? 0, conversation.lastSequence),
+        lastMessagePreview:
+          existingConversation?.lastMessagePreview ?? conversation.lastMessagePreview,
+        lastMessageAt: existingConversation?.lastMessageAt ?? conversation.lastMessageAt,
+        lastSequence: Math.max(existingConversation?.lastSequence ?? 0, conversation.lastSequence),
       });
       break;
     }
     case "conversation.updated": {
-      const updated = toConversation();
-      const known = useChatStore.getState().conversations.find((c) => c.id === updated.id);
-      if (!known && !updated.members.some((m) => m.userId === selfUserId)) break;
-      s.upsertConversation({
-        ...updated,
-        lastMessagePreview: updated.lastMessagePreview ?? known?.lastMessagePreview ?? null,
-        lastMessageAt: updated.lastMessageAt ?? known?.lastMessageAt ?? null,
-        lastSequence: Math.max(known?.lastSequence ?? 0, updated.lastSequence),
+      const updatedConversation = toConversation();
+      const knownConversation = useChatStore
+        .getState()
+        .conversations.find((candidate) => candidate.id === updatedConversation.id);
+      if (
+        !knownConversation &&
+        !updatedConversation.members.some((member) => member.userId === selfUserId)
+      ) {
+        break;
+      }
+      store.upsertConversation({
+        ...updatedConversation,
+        lastMessagePreview:
+          updatedConversation.lastMessagePreview ?? knownConversation?.lastMessagePreview ?? null,
+        lastMessageAt:
+          updatedConversation.lastMessageAt ?? knownConversation?.lastMessageAt ?? null,
+        lastSequence: Math.max(
+          knownConversation?.lastSequence ?? 0,
+          updatedConversation.lastSequence,
+        ),
       });
       break;
     }
@@ -405,16 +418,18 @@ function handleEvent(envelope: EventEnvelope): void {
       // advances it — reading `lastKnown` after applyMessageActivity made
       // `sequence > lastKnown + 1` unreachable (dead recovery path, audit
       // P0). Capture first, apply, then heal if the event jumped a gap.
-      const convBefore = useChatStore.getState().conversations.find((c) => c.id === conversationId);
+      const conversationBeforeEvent = useChatStore
+        .getState()
+        .conversations.find((candidate) => candidate.id === conversationId);
       const lastKnownBefore = Math.max(
-        convBefore?.lastSequence ?? 0,
+        conversationBeforeEvent?.lastSequence ?? 0,
         lastKnownByMessages(conversationId),
       );
-      s.upsertMessage(message);
+      store.upsertMessage(message);
       // Keep the conversation list entry in sync (lastSequence/preview/time)
       // so every client converges on the same server-side sequence.
       const preview = type === "TEXT" ? content.slice(0, 120) : `[${type.toLowerCase()}]`;
-      s.applyMessageActivity(conversationId, {
+      store.applyMessageActivity(conversationId, {
         sequence,
         preview: content ? preview : null,
         at: envelope.timestamp,
@@ -424,11 +439,11 @@ function handleEvent(envelope: EventEnvelope): void {
       }
       // Resolve optimistic pending send.
       const clientMessageId = String(data["clientMessageId"] ?? "");
-      if (clientMessageId) s.resolvePending(clientMessageId);
+      if (clientMessageId) store.resolvePending(clientMessageId);
       break;
     }
     case "message.edited":
-      s.updateMessage(
+      store.updateMessage(
         String(data["messageId"]),
         {
           content: String(data["content"]),
@@ -445,27 +460,27 @@ function handleEvent(envelope: EventEnvelope): void {
         ? (data["memberIds"] as unknown[]).map(String)
         : [];
       if (!deletedMemberIds.length || deletedMemberIds.includes(selfUserId)) {
-        s.removeConversation(deletedId);
+        store.removeConversation(deletedId);
       }
       break;
     }
     case "message.deleted":
-      s.removeMessage(String(data["messageId"]), conversationId || undefined);
+      store.removeMessage(String(data["messageId"]), conversationId || undefined);
       break;
     case "message.rejected": {
       // Authority rejected the send — fail the optimistic entry NOW instead
       // of waiting out the reconciliation timeout (repair-log #27).
       const rejectedCmid = String(data["clientMessageId"] ?? "");
       if (rejectedCmid) {
-        s.markPendingFailed(rejectedCmid);
-        s.setError(`Message rejected: ${String(data["reason"] ?? "unknown reason")}`);
+        store.markPendingFailed(rejectedCmid);
+        store.setError(`Message rejected: ${String(data["reason"] ?? "unknown reason")}`);
       }
       break;
     }
     case "reaction.added":
       // Authoritative: the event type names the target state, so a QoS1
       // redelivery is a no-op — never a flip (repair-log #31).
-      s.applyReaction(
+      store.applyReaction(
         String(data["messageId"]),
         String(data["emoji"]),
         String(data["userId"]),
@@ -474,7 +489,7 @@ function handleEvent(envelope: EventEnvelope): void {
       );
       break;
     case "reaction.removed":
-      s.applyReaction(
+      store.applyReaction(
         String(data["messageId"]),
         String(data["emoji"]),
         String(data["userId"]),
@@ -490,16 +505,16 @@ function handleEvent(envelope: EventEnvelope): void {
       break;
     }
     case "typing.started":
-      s.setTyping(conversationId, String(data["userId"]), true);
+      store.setTyping(conversationId, String(data["userId"]), true);
       break;
     case "typing.stopped":
-      s.setTyping(conversationId, String(data["userId"]), false);
+      store.setTyping(conversationId, String(data["userId"]), false);
       break;
     case "presence.online":
-      s.setPresence(String(data["userId"]), true);
+      store.setPresence(String(data["userId"]), true);
       break;
     case "presence.offline":
-      s.setPresence(String(data["userId"]), false);
+      store.setPresence(String(data["userId"]), false);
       break;
     default:
       break;
@@ -524,9 +539,9 @@ async function recoverSequenceGap(conversationId: string, afterSequence: number)
   if (gapRecovering.has(conversationId)) return;
   gapRecovering.add(conversationId);
   try {
-    const res = await api.getMessages(conversationId, { after: afterSequence, limit: 100 });
+    const response = await api.getMessages(conversationId, { after: afterSequence, limit: 100 });
     const store = useChatStore.getState();
-    for (const message of res.messages) store.upsertMessage(message);
+    for (const message of response.messages) store.upsertMessage(message);
   } catch {
     // Recovery failed — the next canonical event for this conversation will
     // retry; the UI never silently accepts a gap as final state.
@@ -546,20 +561,27 @@ async function recoverAfterReconnect(): Promise<void> {
   const { identity, activeConversationId, messagesByConversation } = useChatStore.getState();
   if (!identity) return;
   try {
-    const convRes = await api.listConversations(identity.userId);
+    const conversationsResponse = await api.listConversations(identity.userId);
     const store = useChatStore.getState();
-    store.setConversations(convRes.conversations);
-    for (const c of convRes.conversations) getRealtimeService().subscribeConversation(c.id);
+    store.setConversations(conversationsResponse.conversations);
+    for (const conversation of conversationsResponse.conversations) {
+      getRealtimeService().subscribeConversation(conversation.id);
+    }
     if (activeConversationId) {
       const cached = messagesByConversation[activeConversationId] ?? [];
       const watermark = cached[cached.length - 1]?.sequence ?? 0;
       if (watermark > 0) {
-        const res = await api.getMessages(activeConversationId, { after: watermark, limit: 100 });
-        const s = useChatStore.getState();
-        for (const message of res.messages) s.upsertMessage(message);
+        const response = await api.getMessages(activeConversationId, {
+          after: watermark,
+          limit: 100,
+        });
+        const latestStore = useChatStore.getState();
+        for (const message of response.messages) latestStore.upsertMessage(message);
       } else {
-        const res = await api.getMessages(activeConversationId, { limit: 50 });
-        useChatStore.getState().setMessages(activeConversationId, res.messages, res.hasMore);
+        const response = await api.getMessages(activeConversationId, { limit: 50 });
+        useChatStore
+          .getState()
+          .setMessages(activeConversationId, response.messages, response.hasMore);
       }
     }
   } catch {

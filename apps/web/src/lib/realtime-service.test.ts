@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RealtimeService } from "./realtime-service";
+import { RealtimeService } from "@/lib/realtime-service";
 
 describe("RealtimeService identity teardown", () => {
   it("shares concurrent disconnects and publishes offline once", async () => {

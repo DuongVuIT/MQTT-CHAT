@@ -2,15 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ChatMarkIcon, ChevronRightIcon } from "@/components/icons";
 import { api, type ApiUser } from "@/lib/api";
 import { loadStoredIdentity, saveIdentity } from "@/lib/identity";
 import { Avatar, Spinner } from "@mqtt-chat/ui";
-
-/**
- * User picker — no auth in this demo. Identity is chosen here and persisted
- * in localStorage; multiple tabs can pick different users/devices. Product
- * styling (§ identity UX): display name + avatar, never a raw engineering id.
- */
 
 export default function UserPickerPage() {
   const router = useRouter();
@@ -20,73 +15,112 @@ export default function UserPickerPage() {
   useEffect(() => {
     api
       .listUsers()
-      .then((r) => setUsers(r.users))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load users"));
+      .then((response) => {
+        setUsers(response.users);
+      })
+      .catch((requestError: unknown) => {
+        setError(requestError instanceof Error ? requestError.message : "Failed to load users");
+      });
   }, []);
 
-  const choose = (userId: string) => {
-    // Reuse existing device id so a refresh keeps the same device identity.
-    const stored = loadStoredIdentity();
+  const chooseIdentity = (userId: string): void => {
+    const storedIdentity = loadStoredIdentity();
     const deviceId =
-      stored?.userId === userId ? stored.deviceId : `web-${Math.random().toString(36).slice(2, 6)}`;
+      storedIdentity?.userId === userId
+        ? storedIdentity.deviceId
+        : `web-${Math.random().toString(36).slice(2, 6)}`;
+
     saveIdentity({ userId, deviceId });
     router.push("/chat");
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-8 shadow-xl">
-        <div className="flex flex-col items-center text-center">
-          <span
-            aria-hidden
-            className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-soft text-2xl"
-          >
-            💬
-          </span>
-          <h1 className="mt-4 text-2xl font-semibold">MQTT Chat</h1>
-          <p className="mt-1 text-sm text-ink-2">
-            This demo has no authentication — pick an identity to start chatting. Open another
-            browser tab to simulate a second user.
-          </p>
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden p-5 sm:p-8">
+      <div
+        aria-hidden
+        className="absolute left-[8%] top-[12%] h-56 w-56 rounded-full bg-brand/10 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="absolute bottom-[8%] right-[10%] h-64 w-64 rounded-full bg-accent/10 blur-3xl"
+      />
+
+      <section className="glass-surface relative grid w-full max-w-4xl overflow-hidden rounded-[28px] border border-line lg:grid-cols-[1.08fr_0.92fr]">
+        <div className="flex flex-col justify-between border-b border-line p-8 sm:p-10 lg:border-b-0 lg:border-r lg:p-12">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-line bg-raised/70 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-brand-strong">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+              Realtime workspace
+            </div>
+            <div className="mt-8 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand text-on-brand shadow-floating">
+              <ChatMarkIcon className="h-8 w-8" />
+            </div>
+            <h1 className="mt-7 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
+              Conversations,
+              <span className="block text-brand-strong">kept in sync.</span>
+            </h1>
+            <p className="mt-5 max-w-md text-[15px] leading-7 text-ink-2">
+              A focused MQTT chat workspace for Web and Mobile, with reliable delivery, presence,
+              media and bot automation.
+            </p>
+          </div>
+
+          <div className="mt-10 grid grid-cols-3 gap-3 text-xs text-ink-3 lg:mt-16">
+            <span>Web + Mobile</span>
+            <span>MQTT realtime</span>
+            <span>Server verified</span>
+          </div>
         </div>
 
-        {error && (
-          <p role="alert" className="mt-4 rounded-lg bg-danger-soft p-3 text-sm text-danger">
-            {error}
+        <div className="bg-surface/75 p-7 sm:p-10 lg:p-12">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-ink-3">Choose profile</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em]">
+            Continue to your chats
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-ink-2">
+            Authentication is not enabled in this project. Select a seeded identity to continue.
           </p>
-        )}
 
-        {!users && !error && (
-          <div className="mt-8 flex justify-center" aria-label="Loading users">
-            <Spinner />
-          </div>
-        )}
+          {error && (
+            <p
+              role="alert"
+              className="mt-5 rounded-xl border border-danger/30 bg-danger-soft p-3 text-sm text-danger"
+            >
+              {error}
+            </p>
+          )}
 
-        {users && (
-          <ul className="mt-6 space-y-2" aria-label="Available users">
-            {users.map((user) => (
-              <li key={user.id}>
-                <button
-                  type="button"
-                  data-user-id={user.id}
-                  onClick={() => {
-                    choose(user.id);
-                  }}
-                  className="flex w-full items-center gap-3 rounded-xl border border-line px-4 py-3 text-left transition-colors duration-fast hover:border-brand-strong hover:bg-raised"
-                >
-                  <Avatar name={user.displayName} colorKey={user.id} size="md" />
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{user.displayName}</span>
-                  </span>
-                  <span aria-hidden className="ml-auto text-ink-3">
-                    ›
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+          {!users && !error && (
+            <div className="mt-10 flex justify-center" aria-label="Loading users">
+              <Spinner />
+            </div>
+          )}
+
+          {users && (
+            <ul className="mt-6 space-y-2.5" aria-label="Available users">
+              {users.map((user) => (
+                <li key={user.id}>
+                  <button
+                    type="button"
+                    data-user-id={user.id}
+                    onClick={() => {
+                      chooseIdentity(user.id);
+                    }}
+                    className="group flex min-h-16 w-full items-center gap-3 rounded-2xl border border-line bg-raised/55 px-4 py-3 text-left transition-all duration-normal hover:-translate-y-0.5 hover:border-brand/60 hover:bg-high hover:shadow-panel"
+                  >
+                    <Avatar name={user.displayName} colorKey={user.id} size="md" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{user.displayName}</span>
+                      <span className="mt-0.5 block text-xs text-ink-3">Open workspace</span>
+                    </span>
+                    <ChevronRightIcon className="h-5 w-5 text-ink-3 transition-transform duration-fast group-hover:translate-x-0.5 group-hover:text-brand-strong" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
     </main>
   );
 }

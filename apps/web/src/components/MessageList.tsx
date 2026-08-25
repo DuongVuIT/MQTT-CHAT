@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChatMarkIcon } from "@/components/icons";
 import { api, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
@@ -39,11 +40,11 @@ const NO_TYPING_USERS: string[] = [];
 function TranscriptSkeleton(): React.JSX.Element {
   return (
     <div className="space-y-3 py-4" aria-label="Loading messages" role="status">
-      {[82, 56, 68, 44, 74, 60].map((w, i) => (
-        <div key={i} className={`flex ${i % 2 === 0 ? "justify-start" : "justify-end"}`}>
+      {[82, 56, 68, 44, 74, 60].map((width, index) => (
+        <div key={index} className={`flex ${index % 2 === 0 ? "justify-start" : "justify-end"}`}>
           <div
             className="animate-skeleton h-9 rounded-2xl bg-raised"
-            style={{ width: `${w}%`, maxWidth: "70%" }}
+            style={{ width: `${width}%`, maxWidth: "70%" }}
           />
         </div>
       ))}
@@ -59,15 +60,17 @@ export function MessageList({
   /** Raise a reply intent to the page (composer reply target). */
   onRequestReply?: (message: ApiMessage) => void;
 }) {
-  const messages = useChatStore((s) => s.messagesByConversation[conversationId]);
-  const pending = useChatStore((s) => s.pendingMessages);
-  const typing = useChatStore((s) => s.typingUsers[conversationId] ?? NO_TYPING_USERS);
-  const users = useChatStore((s) => s.users);
-  const identity = useChatStore((s) => s.identity);
-  const conversations = useChatStore((s) => s.conversations);
-  const hasMore = useChatStore((s) => s.hasMoreHistory[conversationId] ?? false);
-  const loadingHistory = useChatStore((s) => s.loadingHistory);
-  const connectionState = useChatStore((s) => s.connectionState);
+  const messages = useChatStore((state) => state.messagesByConversation[conversationId]);
+  const pendingMessages = useChatStore((state) => state.pendingMessages);
+  const typingUserIds = useChatStore(
+    (state) => state.typingUsers[conversationId] ?? NO_TYPING_USERS,
+  );
+  const users = useChatStore((state) => state.users);
+  const identity = useChatStore((state) => state.identity);
+  const conversations = useChatStore((state) => state.conversations);
+  const hasMore = useChatStore((state) => state.hasMoreHistory[conversationId] ?? false);
+  const loadingHistory = useChatStore((state) => state.loadingHistory);
+  const connectionState = useChatStore((state) => state.connectionState);
 
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -111,14 +114,18 @@ export function MessageList({
 
     void (async () => {
       try {
-        const res = await api.getMessages(conversationId, { limit: PAGE_SIZE });
+        const response = await api.getMessages(conversationId, { limit: PAGE_SIZE });
         if (cancelled) return;
         // Events may arrive after this request starts but before it resolves.
         // Install the snapshot as a base and let the already-applied canonical
         // rows win by id, so history can never erase a live create/edit/delete.
         const store = useChatStore.getState();
-        const live = store.messagesByConversation[conversationId] ?? [];
-        store.setMessages(conversationId, mergeMessageSnapshot(res.messages, live), res.hasMore);
+        const liveMessages = store.messagesByConversation[conversationId] ?? [];
+        store.setMessages(
+          conversationId,
+          mergeMessageSnapshot(response.messages, liveMessages),
+          response.hasMore,
+        );
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "Failed to load history");
@@ -138,16 +145,18 @@ export function MessageList({
   useEffect(() => {
     if (!messages?.length) return;
     if (seenIdsRef.current === null) {
-      seenIdsRef.current = new Set(messages.map((m) => m.id));
+      seenIdsRef.current = new Set(messages.map((message) => message.id));
       return;
     }
-    const fresh = messages.filter((m) => !seenIdsRef.current?.has(m.id));
-    if (fresh.length === 0) return;
-    for (const m of fresh) seenIdsRef.current?.add(m.id);
+    const freshMessages = messages.filter((message) => !seenIdsRef.current?.has(message.id));
+    if (freshMessages.length === 0) return;
+    for (const message of freshMessages) seenIdsRef.current?.add(message.id);
     const lastId = messages[messages.length - 1]?.id;
-    const arrived = fresh.filter((m) => m.id === lastId).map((m) => m.id);
-    if (arrived.length > 0) {
-      setArrivedIds((prev) => new Set([...prev, ...arrived]));
+    const arrivedMessageIds = freshMessages
+      .filter((message) => message.id === lastId)
+      .map((message) => message.id);
+    if (arrivedMessageIds.length > 0) {
+      setArrivedIds((previousIds) => new Set([...previousIds, ...arrivedMessageIds]));
     }
   }, [messages]);
 
@@ -186,7 +195,7 @@ export function MessageList({
         if (el) el.scrollTop = el.scrollHeight;
       } else {
         // User is reading history — never yank the viewport (§35).
-        setUnreadCount((c) => c + Math.max(1, count - prevCountRef.current));
+        setUnreadCount((currentCount) => currentCount + Math.max(1, count - prevCountRef.current));
       }
     }
     // Prepends without an anchor marker (gap recovery) fall through:
@@ -207,11 +216,11 @@ export function MessageList({
     const content = contentRef.current;
     if (!content) return;
     const observer = new ResizeObserver(() => {
-      const el = containerRef.current;
-      if (!el) return;
-      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const container = containerRef.current;
+      if (!container) return;
+      const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
       if (distance < FOLLOW_THRESHOLD) {
-        el.scrollTop = el.scrollHeight;
+        container.scrollTop = container.scrollHeight;
       }
     });
     observer.observe(content);
@@ -220,21 +229,21 @@ export function MessageList({
 
   // Own sends ALWAYS reach the latest message — even if the user had scrolled
   // away, they intend to see the result of their action (§38).
-  const prevPendingCountRef = useRef(pending.length);
+  const previousPendingCountRef = useRef(pendingMessages.length);
   useEffect(() => {
-    const grew = pending.length > prevPendingCountRef.current;
-    prevPendingCountRef.current = pending.length;
-    if (!grew || !pending.length) return;
-    if (pending[pending.length - 1]?.conversationId !== conversationId) return;
+    const queueGrew = pendingMessages.length > previousPendingCountRef.current;
+    previousPendingCountRef.current = pendingMessages.length;
+    if (!queueGrew || !pendingMessages.length) return;
+    if (pendingMessages[pendingMessages.length - 1]?.conversationId !== conversationId) return;
     stickToBottomRef.current = true;
     jumpToLatestRef.current = true; // consume on the next messages commit
     setUnreadCount(0);
     // If the optimistic bubble already rendered, go now.
     requestAnimationFrame(() => {
-      const el = containerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      const container = containerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
     });
-  }, [pending, conversationId]);
+  }, [pendingMessages, conversationId]);
 
   // Read receipt: mark conversation read ONLY while actually viewing the
   // latest message, and only when the watermark actually ADVANCED — edits,
@@ -302,15 +311,15 @@ export function MessageList({
     if (!oldest || !hasMore) return;
     const store = useChatStore.getState();
     if (store.loadingHistory) return; // overlapping fetches corrupt the anchor
-    const el = containerRef.current;
-    if (el) prependAnchorRef.current = { prevHeight: el.scrollHeight };
+    const container = containerRef.current;
+    if (container) prependAnchorRef.current = { prevHeight: container.scrollHeight };
     store.setLoadingHistory(true);
     try {
-      const res = await api.getMessages(conversationId, {
+      const response = await api.getMessages(conversationId, {
         before: oldest.sequence,
         limit: PAGE_SIZE,
       });
-      useChatStore.getState().prependMessages(conversationId, res.messages, res.hasMore);
+      useChatStore.getState().prependMessages(conversationId, response.messages, response.hasMore);
     } catch (error) {
       prependAnchorRef.current = null;
       setLoadError(error instanceof Error ? error.message : "Failed to load older messages");
@@ -320,25 +329,28 @@ export function MessageList({
   };
 
   const onScroll = (): void => {
-    const el = containerRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const container = containerRef.current;
+    if (!container) return;
+    const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
     stickToBottomRef.current = distance < FOLLOW_THRESHOLD;
     if (stickToBottomRef.current && unreadCount > 0) setUnreadCount(0);
   };
 
   const pendingForConversation = useMemo(
-    () => pending.filter((p) => p.conversationId === conversationId),
-    [pending, conversationId],
+    () =>
+      pendingMessages.filter((pendingMessage) => pendingMessage.conversationId === conversationId),
+    [pendingMessages, conversationId],
   );
 
-  const activeConversation = conversations.find((c) => c.id === conversationId);
+  const activeConversation = conversations.find(
+    (conversation) => conversation.id === conversationId,
+  );
   // Read watermark (§14): max lastReadSequence among OTHER members.
   const readWatermark = useMemo(() => {
     let max = 0;
-    for (const m of activeConversation?.members ?? []) {
-      if (m.userId === identity?.userId) continue;
-      if (m.lastReadSequence > max) max = m.lastReadSequence;
+    for (const member of activeConversation?.members ?? []) {
+      if (member.userId === identity?.userId) continue;
+      if (member.lastReadSequence > max) max = member.lastReadSequence;
     }
     return max;
   }, [activeConversation, identity?.userId]);
@@ -382,11 +394,13 @@ export function MessageList({
               setLoadingInitial(true);
               void api
                 .getMessages(conversationId, { limit: PAGE_SIZE })
-                .then((res) =>
-                  useChatStore.getState().setMessages(conversationId, res.messages, res.hasMore),
+                .then((response) =>
+                  useChatStore
+                    .getState()
+                    .setMessages(conversationId, response.messages, response.hasMore),
                 )
-                .catch((e: unknown) =>
-                  setLoadError(e instanceof Error ? e.message : "Failed to load history"),
+                .catch((error: unknown) =>
+                  setLoadError(error instanceof Error ? error.message : "Failed to load history"),
                 )
                 .finally(() => setLoadingInitial(false));
             }}
@@ -411,8 +425,8 @@ export function MessageList({
         <div ref={contentRef}>
           {(!messages || messages.length === 0) && (
             <div className="flex h-full flex-col items-center justify-center text-center">
-              <span aria-hidden className="text-4xl">
-                👋
+              <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-raised text-brand-strong">
+                <ChatMarkIcon className="h-7 w-7" />
               </span>
               <p className="mt-3 text-sm font-semibold">No messages yet</p>
               <p className="mt-1 text-xs text-ink-3">Say hello — messages arrive in realtime.</p>
@@ -458,23 +472,25 @@ export function MessageList({
             ),
           )}
 
-          {pendingForConversation.map((p) => (
-            <div key={p.clientMessageId}>
+          {pendingForConversation.map((pendingMessage) => (
+            <div key={pendingMessage.clientMessageId}>
               <MessageBubble
                 pending={{
-                  content: p.content,
-                  status: p.status,
-                  clientMessageId: p.clientMessageId,
+                  content: pendingMessage.content,
+                  status: pendingMessage.status,
+                  clientMessageId: pendingMessage.clientMessageId,
                 }}
                 isOwn
               />
             </div>
           ))}
 
-          {typing.length > 0 && (
+          {typingUserIds.length > 0 && (
             <p className="mt-2 pl-10 text-xs italic text-ink-3" aria-live="polite">
-              {typing.map((id) => users.find((u) => u.id === id)?.displayName ?? id).join(", ")}{" "}
-              {typing.length === 1 ? "is" : "are"} typing…
+              {typingUserIds
+                .map((userId) => users.find((user) => user.id === userId)?.displayName ?? userId)
+                .join(", ")}{" "}
+              {typingUserIds.length === 1 ? "is" : "are"} typing…
             </p>
           )}
           <div ref={bottomRef} />

@@ -17,17 +17,15 @@ const labels: Record<ConnectionState, string> = {
 };
 
 const tones: Record<ConnectionState, string> = {
-  connecting: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300",
-  connected: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300",
-  reconnecting: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300",
-  disconnected: "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300",
-  error: "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300",
+  connecting: "bg-raised text-warn",
+  connected: "bg-ok-soft text-ok",
+  reconnecting: "bg-raised text-warn",
+  disconnected: "bg-raised text-ink-2",
+  error: "bg-danger-soft text-danger",
 };
 
 /**
- * Connection state, product-subtle (phase-2 §29): normal operation renders a
- * tiny status dot only — a full "Connected" pill must never dominate the
- * header. Degraded states escalate to a labelled pill.
+ * Healthy connections stay quiet; degraded states receive a readable label.
  */
 export function ConnectionBadge({ state, className }: ConnectionBadgeProps) {
   if (state === "connected") {
@@ -38,7 +36,10 @@ export function ConnectionBadge({ state, className }: ConnectionBadgeProps) {
         aria-live="polite"
         className={cn("inline-flex h-2.5 w-2.5 items-center justify-center", className)}
       >
-        <span aria-hidden="true" className="h-2 w-2 rounded-full bg-emerald-500" />
+        <span
+          aria-hidden="true"
+          className="h-2 w-2 rounded-full bg-presence shadow-[0_0_0_3px_var(--ok-soft)]"
+        />
       </span>
     );
   }
@@ -47,14 +48,14 @@ export function ConnectionBadge({ state, className }: ConnectionBadgeProps) {
       role="status"
       aria-live="polite"
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+        "inline-flex min-h-7 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
         tones[state],
         className,
       )}
     >
       <span
         aria-hidden="true"
-        className={cn("h-2 w-2 rounded-full", state === "error" ? "bg-red-500" : "bg-amber-500")}
+        className={cn("h-2 w-2 rounded-full", state === "error" ? "bg-danger" : "bg-warn")}
       />
       {labels[state]}
     </span>

@@ -9,18 +9,16 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<NonNullable<ButtonProps["variant"]>, string> = {
   primary:
-    "bg-blue-600 text-white hover:bg-blue-700 focus-visible:outline-blue-600 disabled:bg-blue-300",
-  secondary:
-    "bg-slate-200 text-slate-900 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600",
-  ghost:
-    "bg-transparent text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800",
-  danger: "bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300",
+    "bg-brand text-on-brand shadow-sm hover:bg-brand-strong focus-visible:outline-brand-strong",
+  secondary: "border border-line-strong bg-raised text-ink hover:border-brand/50 hover:bg-high",
+  ghost: "bg-transparent text-ink-2 hover:bg-raised hover:text-ink",
+  danger: "bg-danger-strong text-on-brand hover:bg-danger",
 };
 
 const sizeClasses: Record<NonNullable<ButtonProps["size"]>, string> = {
   sm: "h-8 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
-  icon: "h-9 w-9 p-0",
+  md: "h-11 px-4 text-sm",
+  icon: "h-11 w-11 p-0",
 };
 
 export function Button({
@@ -34,9 +32,9 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors",
+        "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-fast",
         "focus-visible:outline-2 focus-visible:outline-offset-2",
-        "disabled:cursor-not-allowed disabled:opacity-70",
+        "disabled:cursor-not-allowed disabled:opacity-45",
         variantClasses[variant],
         sizeClasses[size],
         className,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CloseIcon, SettingsIcon } from "@/components/icons";
 import { useChatStore } from "@/store/chat-store";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { API_URL } from "@/lib/api";
@@ -17,14 +18,15 @@ import { API_URL } from "@/lib/api";
 export function DiagnosticsPanel() {
   const [open, setOpen] = useState(false);
   const [lastEvent, setLastEvent] = useState<string | null>(null);
-  const connectionState = useChatStore((s) => s.connectionState);
-  const identity = useChatStore((s) => s.identity);
-  const conversations = useChatStore((s) => s.conversations);
-  const activeConversationId = useChatStore((s) => s.activeConversationId);
-  const pendingCount = useChatStore((s) => s.pendingMessages.length);
-  const lastSequence = useChatStore((s) =>
+  const connectionState = useChatStore((state) => state.connectionState);
+  const identity = useChatStore((state) => state.identity);
+  const conversations = useChatStore((state) => state.conversations);
+  const activeConversationId = useChatStore((state) => state.activeConversationId);
+  const pendingCount = useChatStore((state) => state.pendingMessages.length);
+  const lastSequence = useChatStore((state) =>
     activeConversationId
-      ? (s.conversations.find((c) => c.id === activeConversationId)?.lastSequence ?? 0)
+      ? (state.conversations.find((conversation) => conversation.id === activeConversationId)
+          ?.lastSequence ?? 0)
       : 0,
   );
 
@@ -44,36 +46,40 @@ export function DiagnosticsPanel() {
       <button
         type="button"
         onClick={() => {
-          setOpen((v) => !v);
+          setOpen((currentValue) => !currentValue);
         }}
-        className="rounded-full bg-slate-900 px-3 py-1 text-slate-200 shadow-lg ring-1 ring-slate-700 hover:bg-slate-800"
+        className="flex items-center gap-2 rounded-full border border-line-strong bg-surface/95 px-3 py-2 text-ink-2 shadow-floating hover:bg-raised hover:text-ink"
         aria-expanded={open}
       >
-        {open ? "× diagnostics" : "⚙ diagnostics"}
+        {open ? <CloseIcon className="h-3.5 w-3.5" /> : <SettingsIcon className="h-3.5 w-3.5" />}
+        <span>Diagnostics</span>
       </button>
       {open && (
         <dl className="mt-2 max-h-80 w-80 overflow-y-auto rounded-xl bg-slate-950/95 p-3 leading-relaxed text-slate-300 shadow-xl ring-1 ring-slate-700">
-          <Row k="origin" v={typeof window === "undefined" ? "—" : window.location.origin} />
-          <Row k="api" v={API_URL} />
-          <Row k="mqtt" v={connectionState} />
-          <Row k="userId" v={identity?.userId ?? "—"} />
-          <Row k="deviceId" v={identity?.deviceId ?? "—"} />
-          <Row k="conversations" v={String(conversations.length)} />
-          <Row k="activeConv" v={activeConversationId ?? "—"} />
-          <Row k="lastSequence" v={String(lastSequence)} />
-          <Row k="pendingQueue" v={String(pendingCount)} />
-          <Row k="lastEvent" v={lastEvent ?? "—"} />
+          <Row
+            label="origin"
+            value={typeof window === "undefined" ? "—" : window.location.origin}
+          />
+          <Row label="api" value={API_URL} />
+          <Row label="mqtt" value={connectionState} />
+          <Row label="userId" value={identity?.userId ?? "—"} />
+          <Row label="deviceId" value={identity?.deviceId ?? "—"} />
+          <Row label="conversations" value={String(conversations.length)} />
+          <Row label="activeConv" value={activeConversationId ?? "—"} />
+          <Row label="lastSequence" value={String(lastSequence)} />
+          <Row label="pendingQueue" value={String(pendingCount)} />
+          <Row label="lastEvent" value={lastEvent ?? "—"} />
         </dl>
       )}
     </div>
   );
 }
 
-function Row({ k, v }: { k: string; v: string }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <>
-      <dt className="inline text-slate-500">{k}: </dt>
-      <dd className="inline break-all">{v}</dd>
+      <dt className="inline text-slate-500">{label}: </dt>
+      <dd className="inline break-all">{value}</dd>
       <br />
     </>
   );

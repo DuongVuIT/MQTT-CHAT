@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CloseIcon, PaperclipIcon, SendIcon } from "@/components/icons";
 import { api, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { republishPayload, useChatStore } from "@/store/chat-store";
@@ -16,7 +17,7 @@ function armSendTimeout(clientMessageId: string, timeoutMs: number = SEND_TIMEOU
   setTimeout(() => {
     const entry = useChatStore
       .getState()
-      .pendingMessages.find((p) => p.clientMessageId === clientMessageId);
+      .pendingMessages.find((pendingMessage) => pendingMessage.clientMessageId === clientMessageId);
     // Still unresolved (queued or published-but-unacked) → FAILED. The same
     // clientMessageId stays retryable, so nothing is ever silently dropped.
     if (entry && entry.status !== "failed") {
@@ -71,10 +72,12 @@ export function publishOrQueueSend(body: {
  * Exported for the retry button rendered next to failed bubbles.
  */
 export function retryPendingMessage(clientMessageId: string): void {
-  const s = useChatStore.getState();
-  const pending = s.pendingMessages.find((p) => p.clientMessageId === clientMessageId);
+  const store = useChatStore.getState();
+  const pending = store.pendingMessages.find(
+    (pendingMessage) => pendingMessage.clientMessageId === clientMessageId,
+  );
   if (!pending) return;
-  s.retryPending(clientMessageId);
+  store.retryPending(clientMessageId);
   getRealtimeService().publishCommand("message.send", republishPayload(pending));
   armSendTimeout(clientMessageId);
 }
@@ -95,7 +98,7 @@ export function Composer({
 }) {
   const [text, setText] = useState("");
   const [uploading, setUploading] = useState(false);
-  const identity = useChatStore((s) => s.identity);
+  const identity = useChatStore((state) => state.identity);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -104,10 +107,10 @@ export function Composer({
   // Auto-grow: the textarea tracks its content up to the cap (§32) — no
   // one-row box with internal scrolling.
   useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
   }, [text]);
 
   if (!identity) return null;
@@ -124,7 +127,7 @@ export function Composer({
     }, TYPING_DEBOUNCE_MS);
   };
 
-  const send = (): void => {
+  const sendMessage = (): void => {
     const content = text.trim();
     if (!content || uploading) return;
     setText("");
@@ -160,7 +163,7 @@ export function Composer({
         content: "",
         type: isImage ? "IMAGE" : "FILE",
         replyToId: null,
-        pendingContent: `📎 ${file.name}`,
+        pendingContent: file.name,
         metadata: {
           // Durable storage key ONLY — never a signed URL or dev host.
           // Recipients resolve it at read time via GET /media.
@@ -179,10 +182,10 @@ export function Composer({
   };
 
   return (
-    <footer className="border-t border-line px-3 py-2.5">
+    <footer className="glass-surface border-t border-line px-3 py-3 md:px-6 md:py-4">
       {replyTo && !replyTo.deletedAt && (
         <div
-          className="animate-sheet-in mb-2 flex items-center justify-between gap-2 rounded-lg border-l-2 border-brand-strong bg-raised px-3 py-1.5 text-xs"
+          className="animate-sheet-in mx-auto mb-2 flex max-w-3xl items-center justify-between gap-2 rounded-xl border border-line border-l-2 border-l-brand-strong bg-raised px-3 py-2 text-xs"
           data-testid="reply-banner"
         >
           <div className="min-w-0">
@@ -190,28 +193,28 @@ export function Composer({
             <p className="truncate text-ink-3">
               {replyTo.type === "TEXT" || !replyTo.metadata
                 ? replyTo.content || "(empty)"
-                : `📎 ${String(replyTo.metadata["filename"] ?? "Attachment")}`}
+                : String(replyTo.metadata["filename"] ?? "Attachment")}
             </p>
           </div>
           <button
             type="button"
             aria-label="Cancel reply"
             onClick={onCancelReply}
-            className="rounded px-1.5 py-0.5 text-ink-3 hover:text-ink"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-3 hover:bg-high hover:text-ink"
           >
-            ✕
+            <CloseIcon className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
+      <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-[22px] border border-line-strong bg-raised/90 p-1.5 shadow-panel transition-colors focus-within:border-brand/60">
         <button
           type="button"
           aria-label={uploading ? "Uploading…" : "Attach file"}
           disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-raised text-lg text-ink-2 transition-colors duration-fast hover:bg-high hover:text-ink disabled:opacity-50"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-ink-2 transition-colors duration-fast hover:bg-high hover:text-ink disabled:opacity-50"
         >
-          <span aria-hidden>📎</span>
+          <PaperclipIcon className="h-5 w-5" />
         </button>
         <input
           ref={fileInputRef}
@@ -230,7 +233,7 @@ export function Composer({
           rows={1}
           aria-label="Message"
           data-testid="composer-input"
-          placeholder={uploading ? "Uploading…" : "Type a message… (/help for bot commands)"}
+          placeholder={uploading ? "Uploading…" : "Write a message…"}
           disabled={uploading}
           onChange={(e) => {
             setText(e.target.value);
@@ -239,7 +242,7 @@ export function Composer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              send();
+              sendMessage();
             }
           }}
           onPaste={(e) => {
@@ -250,18 +253,18 @@ export function Composer({
               void uploadFile(file);
             }
           }}
-          className="max-h-40 min-h-[42px] flex-1 resize-none rounded-2xl bg-raised px-3.5 py-2.5 text-sm outline-none transition-colors duration-fast placeholder:text-ink-3 disabled:opacity-60"
+          className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-2 py-3 text-sm leading-5 outline-none placeholder:text-ink-3 disabled:opacity-60"
         />
 
         <button
           type="button"
-          onClick={send}
+          onClick={sendMessage}
           disabled={!text.trim() || uploading}
           aria-label="Send message"
           data-testid="send-button"
-          className="flex h-10 shrink-0 items-center justify-center rounded-full bg-brand px-4 text-sm font-semibold text-on-brand transition-all duration-fast hover:bg-brand-strong disabled:opacity-40"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand text-on-brand shadow-floating transition-all duration-fast hover:bg-brand-strong disabled:shadow-none disabled:opacity-40"
         >
-          {uploading ? "…" : "Send"}
+          {uploading ? "…" : <SendIcon className="h-5 w-5" />}
         </button>
       </div>
     </footer>

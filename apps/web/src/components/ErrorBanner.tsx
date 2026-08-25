@@ -16,7 +16,7 @@ import { useChatStore } from "@/store/chat-store";
 const AUTO_DISMISS_MS = 8_000;
 
 export function ErrorBanner() {
-  const error = useChatStore((s) => s.error);
+  const error = useChatStore((state) => state.error);
 
   useEffect(() => {
     if (!error) return;

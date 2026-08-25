@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { republishPayload, useChatStore } from "./chat-store";
-import type { ApiConversation, ApiMessage } from "../lib/api";
+import type { ApiConversation, ApiMessage } from "@/lib/api";
+import { republishPayload, useChatStore } from "@/store/chat-store";
 
 /**
  * Regression tests for the client-side message state machine:

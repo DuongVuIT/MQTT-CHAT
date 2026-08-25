@@ -2,48 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-/*
- * Design tokens (phase-2 §4/§5/§61/§62/§63) — the web half of ONE product
- * visual language. Values mirror apps/mobile/src/theme/tokens.ts so web and
- * mobile read as the same product. Dark is the DEFAULT (matches mobile);
- * a tuned light palette applies via prefers-color-scheme. Components never
- * hardcode hex values — they consume the semantic tailwind aliases
- * (bg-app, bg-surface, text-ink, border-line, bg-brand …) defined in
- * tailwind.config.ts, which point at these variables.
- */
+/* Shared product tokens. Mobile mirrors this palette in theme/tokens.ts. */
 
 :root {
-  /* Base ramp — layered dark surfaces (never pure black). */
-  --app: #0b1220;
-  --surface: #131c30;
-  --raised: #1c2942;
-  --high: #263554;
-  --line: #1d2a45;
-  --line-strong: #2c3b5f;
+  --app: #07101f;
+  --surface: #0d1829;
+  --raised: #15243a;
+  --high: #1d3150;
+  --line: #1c2d47;
+  --line-strong: #314766;
 
   /* Text tiers */
-  --ink: #f2f6fd;
-  --ink-2: #9aa9c7;
-  --ink-3: #5e6e8f;
+  --ink: #f7f9fd;
+  --ink-2: #b3bfd2;
+  --ink-3: #7486a3;
 
-  /* Brand — ONE indigo (mirrors mobile tokens.colors.primary). */
-  --brand: #6366f1;
-  --brand-strong: #818cf8;
-  --brand-soft: rgba(99, 102, 241, 0.16);
+  --brand: #5b7cfa;
+  --brand-strong: #86a0ff;
+  --brand-soft: rgba(91, 124, 250, 0.17);
   --on-brand: #ffffff;
+  --accent: #32d3a2;
+  --accent-soft: rgba(50, 211, 162, 0.13);
 
   /* Semantic states */
-  --ok: #34d399;
-  --ok-soft: rgba(52, 211, 153, 0.14);
+  --ok: #32d3a2;
+  --ok-soft: rgba(50, 211, 162, 0.13);
   --warn: #fbbf24;
   --danger: #f87171;
   --danger-strong: #ef4444;
   --danger-soft: rgba(248, 113, 113, 0.13);
 
   /* Presence + overlays */
-  --presence: #34d399;
-  --presence-off: #44546b;
-  --scrim: rgba(4, 9, 20, 0.62);
+  --presence: #32d3a2;
+  --presence-off: #4b5f7b;
+  --scrim: rgba(2, 7, 17, 0.72);
 
   /* Motion tokens (§39) — semantic timing only. */
   --motion-fast: 130ms;
@@ -56,21 +48,23 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --app: #f6f8fc;
+    --app: #f2f5fb;
     --surface: #ffffff;
-    --raised: #eef2f9;
-    --high: #e3e9f3;
-    --line: #dfe5f0;
-    --line-strong: #c6d0e2;
+    --raised: #edf2fa;
+    --high: #e2eaf6;
+    --line: #dce5f1;
+    --line-strong: #becce0;
 
-    --ink: #101828;
-    --ink-2: #5a6b87;
-    --ink-3: #8a97ae;
+    --ink: #0d1728;
+    --ink-2: #53657f;
+    --ink-3: #7c8da7;
 
-    --brand: #4f46e5;
-    --brand-strong: #6366f1;
-    --brand-soft: rgba(79, 70, 229, 0.1);
+    --brand: #315ee8;
+    --brand-strong: #244bc7;
+    --brand-soft: rgba(49, 94, 232, 0.1);
     --on-brand: #ffffff;
+    --accent: #078a68;
+    --accent-soft: rgba(7, 138, 104, 0.1);
 
     --ok: #059669;
     --ok-soft: rgba(5, 150, 105, 0.1);
@@ -91,12 +85,61 @@ body {
 }
 
 body {
-  background-color: var(--app);
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      color-mix(in srgb, var(--brand) 14%, transparent),
+      transparent 32rem
+    ),
+    radial-gradient(
+      circle at 92% 100%,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 28rem
+    ),
+    var(--app);
   color: var(--ink);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Scrollbars — coherent across WebKit and Firefox (§58). */
+::selection {
+  background: var(--brand-soft);
+  color: var(--ink);
+}
+
+button,
+a,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+a[href] {
+  cursor: pointer;
+}
+
+.glass-surface {
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 18px 55px rgba(1, 7, 18, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.elevated-surface {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 18px 48px rgba(1, 7, 18, 0.24);
+}
+
+/* Quiet scrollbars that keep dense chat surfaces readable. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
@@ -116,11 +159,7 @@ body {
   background-color: var(--ink-3);
 }
 
-/* The transcript never rubber-bands the whole page (§ scroll containment).
-   overflow-anchor: none — the list compensates prepends ITSELF (exact
-   height-delta in a layout effect, §37); the browser's native scroll
-   anchoring would adjust scrollTop FIRST and the manual compensation would
-   then DOUBLE it, slamming the viewport to the bottom. */
+/* The list preserves its own scroll anchor when older history is prepended. */
 .scroll-contain {
   overscroll-behavior: contain;
   overflow-anchor: none;
@@ -135,7 +174,7 @@ body {
   }
 }
 
-/* ---- Chat motion (subtle, reduced-motion aware) ------------------------ */
+/* Subtle motion with a reduced-motion fallback. */
 
 @keyframes bubble-in {
   from {
@@ -163,7 +202,6 @@ body {
   }
 }
 
-/* New-messages pill: one gentle entrance (§36) — no infinite bounce. */
 .animate-pill-in {
   animation: pill-in var(--motion-normal) var(--ease-enter) both;
 }
@@ -206,7 +244,7 @@ body {
   }
 }
 
-/* Keyboard focus — one visible, consistent ring (§68). */
+/* One visible focus treatment across the product. */
 :where(button, a, input, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--brand-strong);
   outline-offset: 2px;

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CloseIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import { api } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
@@ -13,14 +14,14 @@ import { Avatar } from "@mqtt-chat/ui";
  * timestamp/unread badge. Skeleton rows while the roster loads (§66).
  */
 
-function timeLabel(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const sameDay = new Date().toDateString() === d.toDateString();
+function timeLabel(timestamp: string | null | undefined): string {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const sameDay = new Date().toDateString() === date.toDateString();
   return sameDay
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function SidebarSkeleton(): React.JSX.Element {
@@ -42,48 +43,58 @@ export function Sidebar() {
   // PERF: slice subscriptions — the whole-store destructure re-rendered the
   // sidebar on EVERY store mutation (typing, receipts, message arrays…).
   // Actions are stable and never trigger renders.
-  const identity = useChatStore((s) => s.identity);
-  const users = useChatStore((s) => s.users);
-  const conversations = useChatStore((s) => s.conversations);
-  const presence = useChatStore((s) => s.presence);
-  const activeConversationId = useChatStore((s) => s.activeConversationId);
-  const conversationsLoaded = useChatStore((s) => s.conversationsLoaded);
-  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
-  const [creating, setCreating] = useState(false);
-  const [filter, setFilter] = useState("");
+  const identity = useChatStore((state) => state.identity);
+  const users = useChatStore((state) => state.users);
+  const conversations = useChatStore((state) => state.conversations);
+  const presence = useChatStore((state) => state.presence);
+  const activeConversationId = useChatStore((state) => state.activeConversationId);
+  const conversationsLoaded = useChatStore((state) => state.conversationsLoaded);
+  const setActiveConversation = useChatStore((state) => state.setActiveConversation);
+  const [isCreating, setIsCreating] = useState(false);
+  const [conversationFilter, setConversationFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   // Identity is ALWAYS the runtime userId — display names are never identity.
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState("");
 
   // ONE conversationId = ONE entity: dedupe by id, order by recency.
-  const sorted = useMemo(() => {
-    const byId = new Map(conversations.map((c) => [c.id, c]));
-    return [...byId.values()].sort((a, b) => {
-      const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
-      const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
-      return tb - ta;
+  const sortedConversations = useMemo(() => {
+    const conversationsById = new Map(
+      conversations.map((conversation) => [conversation.id, conversation]),
+    );
+    return [...conversationsById.values()].sort((firstConversation, secondConversation) => {
+      const firstTimestamp = firstConversation.lastMessageAt
+        ? Date.parse(firstConversation.lastMessageAt)
+        : 0;
+      const secondTimestamp = secondConversation.lastMessageAt
+        ? Date.parse(secondConversation.lastMessageAt)
+        : 0;
+      return secondTimestamp - firstTimestamp;
     });
   }, [conversations]);
 
-  const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return sorted;
-    const userById = new Map(users.map((u) => [u.id, u]));
-    return sorted.filter((c) => {
-      if (c.type === "GROUP") return (c.title ?? "group").toLowerCase().includes(q);
-      const peerId = c.members?.find((m) => m.userId !== identity?.userId)?.userId;
-      const name = userById.get(peerId ?? "")?.displayName ?? peerId ?? "";
-      return name.toLowerCase().includes(q);
+  const visibleConversations = useMemo(() => {
+    const normalizedFilter = conversationFilter.trim().toLowerCase();
+    if (!normalizedFilter) return sortedConversations;
+    const usersById = new Map(users.map((user) => [user.id, user]));
+    return sortedConversations.filter((conversation) => {
+      if (conversation.type === "GROUP") {
+        return (conversation.title ?? "group").toLowerCase().includes(normalizedFilter);
+      }
+      const peerId = conversation.members?.find(
+        (member) => member.userId !== identity?.userId,
+      )?.userId;
+      const displayName = usersById.get(peerId ?? "")?.displayName ?? peerId ?? "";
+      return displayName.toLowerCase().includes(normalizedFilter);
     });
-  }, [sorted, filter, users, identity?.userId]);
+  }, [sortedConversations, conversationFilter, users, identity?.userId]);
 
   const toggleMember = (userId: string, on: boolean): void => {
-    setSelectedMembers((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(userId);
-      else next.delete(userId);
-      return next;
+    setSelectedMembers((previousMembers) => {
+      const nextMembers = new Set(previousMembers);
+      if (on) nextMembers.add(userId);
+      else nextMembers.delete(userId);
+      return nextMembers;
     });
   };
 
@@ -91,7 +102,7 @@ export function Sidebar() {
     if (!identity || selectedMembers.size === 0) return;
     try {
       const isGroup = selectedMembers.size > 1 || groupName.trim().length > 0;
-      const res = await api.createConversation({
+      const response = await api.createConversation({
         type: isGroup ? "GROUP" : "DIRECT",
         title: isGroup ? groupName.trim() || undefined : undefined,
         createdBy: identity.userId,
@@ -99,10 +110,10 @@ export function Sidebar() {
       });
       // Upsert (never prepend blindly): if the canonical conversation.created
       // realtime event already inserted this entity, we converge on ONE row.
-      useChatStore.getState().upsertConversation(res.conversation);
-      getRealtimeService().subscribeConversation(res.conversation.id);
-      setActiveConversation(res.conversation.id);
-      setCreating(false);
+      useChatStore.getState().upsertConversation(response.conversation);
+      getRealtimeService().subscribeConversation(response.conversation.id);
+      setActiveConversation(response.conversation.id);
+      setIsCreating(false);
       setSelectedMembers(new Set());
       setUserFilter("");
       setGroupName("");
@@ -113,12 +124,12 @@ export function Sidebar() {
     }
   };
 
-  const identityUser = users.find((u) => u.id === identity?.userId);
+  const identityUser = users.find((user) => user.id === identity?.userId);
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-surface">
+    <aside className="glass-surface flex w-80 shrink-0 flex-col border-r border-line">
       {/* Profile header (§27) — display name, not engineering ids. */}
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
+      <div className="flex min-h-16 items-center justify-between gap-2 border-b border-line px-4">
         <div className="flex min-w-0 items-center gap-2.5">
           <Avatar
             name={identityUser?.displayName ?? identity?.userId ?? "?"}
@@ -138,45 +149,48 @@ export function Sidebar() {
             window.localStorage.removeItem("mqtt-chat-identity");
             router.push("/");
           }}
-          className="rounded-lg px-2 py-1 text-xs font-medium text-ink-3 transition-colors duration-fast hover:bg-raised hover:text-ink"
+          className="rounded-lg px-2.5 py-2 text-xs font-medium text-ink-2 transition-colors duration-fast hover:bg-raised hover:text-ink"
         >
           Switch
         </button>
       </div>
 
-      <div className="flex items-center gap-2 px-3 pb-2 pt-3">
-        <input
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value);
-          }}
-          placeholder="Search chats"
-          aria-label="Search conversations"
-          className="h-8 min-w-0 flex-1 rounded-lg bg-raised px-2.5 text-sm outline-none placeholder:text-ink-3"
-        />
+      <div className="flex items-center gap-2 px-3 pb-3 pt-4">
+        <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-raised/70 px-3 transition-colors focus-within:border-brand/60">
+          <SearchIcon className="h-4 w-4 shrink-0 text-ink-3" />
+          <input
+            value={conversationFilter}
+            onChange={(e) => {
+              setConversationFilter(e.target.value);
+            }}
+            placeholder="Search chats"
+            aria-label="Search conversations"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-3"
+          />
+        </label>
         <button
           type="button"
-          aria-label={creating ? "Cancel new conversation" : "New conversation"}
+          aria-label={isCreating ? "Cancel new conversation" : "New conversation"}
           onClick={() => {
-            setCreating((v) => !v);
-            if (creating) {
+            setIsCreating((currentValue) => !currentValue);
+            if (isCreating) {
               setSelectedMembers(new Set());
               setUserFilter("");
               setGroupName("");
             }
           }}
-          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg font-medium transition-colors duration-fast ${
-            creating
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-lg font-medium transition-colors duration-fast ${
+            isCreating
               ? "bg-raised text-ink hover:bg-high"
-              : "bg-brand text-on-brand hover:bg-brand-strong"
+              : "border-brand bg-brand text-on-brand shadow-floating hover:bg-brand-strong"
           }`}
         >
-          {creating ? "×" : "+"}
+          {isCreating ? <CloseIcon className="h-4 w-4" /> : <PlusIcon className="h-4 w-4" />}
         </button>
       </div>
 
-      {creating && (
-        <div className="animate-sheet-in mx-3 mb-2 rounded-xl border border-line bg-app p-3">
+      {isCreating && (
+        <div className="animate-sheet-in elevated-surface mx-3 mb-3 rounded-2xl border border-line-strong p-3">
           <input
             value={groupName}
             onChange={(e) => {
@@ -198,25 +212,25 @@ export function Sidebar() {
           <ul className="max-h-48 space-y-0.5 overflow-y-auto" aria-label="Selectable users">
             {users
               .filter(
-                (u) =>
-                  u.id !== identity?.userId &&
+                (user) =>
+                  user.id !== identity?.userId &&
                   (userFilter.trim() === "" ||
-                    u.displayName.toLowerCase().includes(userFilter.trim().toLowerCase())),
+                    user.displayName.toLowerCase().includes(userFilter.trim().toLowerCase())),
               )
-              .map((u) => {
-                const checked = selectedMembers.has(u.id);
+              .map((user) => {
+                const isSelected = selectedMembers.has(user.id);
                 return (
-                  <li key={u.id}>
+                  <li key={user.id}>
                     <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition-colors duration-fast hover:bg-raised">
                       <input
                         type="checkbox"
-                        checked={checked}
+                        checked={isSelected}
                         onChange={(e) => {
-                          toggleMember(u.id, e.target.checked);
+                          toggleMember(user.id, e.target.checked);
                         }}
                         className="h-3.5 w-3.5 accent-[var(--brand)]"
                       />
-                      <span className="truncate">{u.displayName}</span>
+                      <span className="truncate">{user.displayName}</span>
                     </label>
                   </li>
                 );
@@ -246,79 +260,82 @@ export function Sidebar() {
             <SidebarSkeleton />
           </>
         )}
-        {conversationsLoaded && visible.length === 0 && (
+        {conversationsLoaded && visibleConversations.length === 0 && (
           <li className="px-2 py-8 text-center">
             <p className="text-sm font-medium text-ink-2">No conversations yet</p>
             <p className="mt-1 text-xs text-ink-3">Start one with the + button above.</p>
           </li>
         )}
-        {visible.map((c) => {
+        {visibleConversations.map((conversation) => {
           // Defensive: a conversation payload missing `members` (e.g. a
           // stale/cached response) must degrade gracefully, not crash the
           // whole chat page. The API contract guarantees members, but the
           // UI must tolerate incomplete data.
-          const members = c.members ?? [];
-          const otherMember = members.find((m) => m.userId !== identity?.userId);
-          const otherUser = users.find((u) => u.id === otherMember?.userId);
+          const members = conversation.members ?? [];
+          const otherMember = members.find((member) => member.userId !== identity?.userId);
+          const otherUser = users.find((user) => user.id === otherMember?.userId);
           const online = otherMember ? presence[otherMember.userId] : false;
-          const isActive = c.id === activeConversationId;
-          const isGroup = c.type === "GROUP";
+          const isActive = conversation.id === activeConversationId;
+          const isGroup = conversation.type === "GROUP";
           // Unread = canonical lastSequence − MY read watermark (§8).
-          const myRead = members.find((m) => m.userId === identity?.userId)?.lastReadSequence ?? 0;
-          const unread = Math.max(0, (c.lastSequence ?? 0) - myRead);
+          const lastReadSequence =
+            members.find((member) => member.userId === identity?.userId)?.lastReadSequence ?? 0;
+          const unreadCount = Math.max(0, (conversation.lastSequence ?? 0) - lastReadSequence);
           const title = isGroup
-            ? (c.title ?? "Group")
+            ? (conversation.title ?? "Group")
             : // Peer-relative label: A sees B, B sees A — never a generic
               // "Direct chat" when any peer info exists.
               (otherUser?.displayName ?? otherMember?.userId ?? "Direct chat");
           return (
-            <li key={c.id}>
+            <li key={conversation.id}>
               <button
                 type="button"
                 onClick={() => {
-                  setActiveConversation(c.id);
+                  setActiveConversation(conversation.id);
                 }}
                 aria-current={isActive}
-                data-testid={`conversation-${c.id}`}
-                className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors duration-fast ${
-                  isActive ? "bg-brand-soft" : "hover:bg-raised"
+                data-testid={`conversation-${conversation.id}`}
+                className={`flex min-h-16 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left transition-colors duration-fast ${
+                  isActive
+                    ? "border border-brand/30 bg-brand-soft"
+                    : "border border-transparent hover:bg-raised"
                 }`}
               >
                 <Avatar
                   name={title}
-                  colorKey={isGroup ? c.id : (otherMember?.userId ?? c.id)}
+                  colorKey={isGroup ? conversation.id : (otherMember?.userId ?? conversation.id)}
                   size="md"
                   online={isGroup ? undefined : online}
                 />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span
-                      className={`block truncate text-sm ${unread > 0 ? "font-semibold" : "font-medium"}`}
+                      className={`block truncate text-sm ${unreadCount > 0 ? "font-semibold" : "font-medium"}`}
                     >
                       {title}
                     </span>
                     <span
                       className={`block shrink-0 text-[11px] ${
-                        unread > 0 ? "font-semibold text-brand-strong" : "text-ink-3"
+                        unreadCount > 0 ? "font-semibold text-brand-strong" : "text-ink-3"
                       }`}
                     >
-                      {timeLabel(c.lastMessageAt)}
+                      {timeLabel(conversation.lastMessageAt)}
                     </span>
                   </span>
                   <span className="flex items-center justify-between gap-2">
                     <span
                       className={`block truncate text-xs ${
-                        unread > 0 ? "font-medium text-ink" : "text-ink-3"
+                        unreadCount > 0 ? "font-medium text-ink" : "text-ink-3"
                       }`}
                     >
-                      {c.lastMessagePreview ?? "No messages yet"}
+                      {conversation.lastMessagePreview ?? "No messages yet"}
                     </span>
-                    {unread > 0 && (
+                    {unreadCount > 0 && (
                       <span
-                        data-testid={`unread-${c.id}`}
+                        data-testid={`unread-${conversation.id}`}
                         className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-brand px-1.5 text-[10px] font-bold text-on-brand"
                       >
-                        {unread > 99 ? "99+" : unread}
+                        {unreadCount > 99 ? "99+" : unreadCount}
                       </span>
                     )}
                   </span>

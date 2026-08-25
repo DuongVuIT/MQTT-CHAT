@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
+import { FileIcon } from "@/components/icons";
 import { mediaViewUrl, type ApiMessage } from "@/lib/api";
 import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
@@ -26,18 +27,12 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-const FILE_GLYPHS: Array<[RegExp, string]> = [
-  [/pdf/i, "📕"],
-  [/text\/|^(.*\.(txt|md|csv))$/i, "📄"],
-  [/zip|tar|gz|rar/i, "🗂️"],
-  [/sheet|csv|xlsx/i, "📊"],
-];
-
-function fileGlyph(mimeType: string, filename: string): string {
-  for (const [re, glyph] of FILE_GLYPHS) {
-    if (re.test(mimeType) || re.test(filename)) return glyph;
-  }
-  return "📎";
+function fileTypeLabel(mimeType: string, filename: string): string {
+  if (/pdf/i.test(mimeType) || /\.pdf$/i.test(filename)) return "PDF";
+  if (/zip|tar|gz|rar/i.test(mimeType) || /\.(zip|tar|gz|rar)$/i.test(filename)) return "ZIP";
+  if (/sheet|csv|xlsx/i.test(mimeType) || /\.(csv|xlsx)$/i.test(filename)) return "XLS";
+  if (/text\//i.test(mimeType) || /\.(txt|md)$/i.test(filename)) return "TXT";
+  return "FILE";
 }
 
 /**
@@ -59,7 +54,7 @@ function quoteText(source: ApiMessage | null): string {
   if (!source) return "Original message unavailable";
   if (source.deletedAt) return "Message deleted";
   if (source.type === "TEXT" || !source.metadata) return source.content || "(empty)";
-  return `📎 ${String(source.metadata["filename"] ?? "Attachment")}`;
+  return String(source.metadata["filename"] ?? "Attachment");
 }
 
 export const MessageBubble = memo(function MessageBubble({
@@ -82,7 +77,7 @@ export const MessageBubble = memo(function MessageBubble({
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const identity = useChatStore((s) => s.identity);
+  const identity = useChatStore((state) => state.identity);
 
   if (pending) {
     return (
@@ -178,7 +173,7 @@ export const MessageBubble = memo(function MessageBubble({
             }`}
             aria-hidden={!row.startsGroup}
           >
-            {isBot ? "🤖" : initialsFromDisplayName(message.senderName)}
+            {isBot ? "BOT" : initialsFromDisplayName(message.senderName)}
           </span>
         )}
         <div className="min-w-0">
@@ -250,11 +245,14 @@ export const MessageBubble = memo(function MessageBubble({
             ) : message.type !== "TEXT" && message.type !== "SYSTEM" ? (
               // File card (§21): icon + name + size — no raw keys/URLs.
               <span className="flex min-w-[12rem] items-center gap-2.5 py-0.5">
-                <span aria-hidden className="text-2xl">
-                  {fileGlyph(
-                    String(message.metadata?.["mimeType"] ?? ""),
-                    String(message.metadata?.["filename"] ?? ""),
-                  )}
+                <span className="flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-xl bg-white/10">
+                  <FileIcon className="h-4 w-4" />
+                  <span className="mt-0.5 text-[8px] font-bold tracking-wide">
+                    {fileTypeLabel(
+                      String(message.metadata?.["mimeType"] ?? ""),
+                      String(message.metadata?.["filename"] ?? ""),
+                    )}
+                  </span>
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate font-medium">
@@ -331,11 +329,11 @@ export const MessageBubble = memo(function MessageBubble({
                 type="button"
                 aria-label="Add reaction"
                 onClick={() => {
-                  setShowEmojiPicker((v) => !v);
+                  setShowEmojiPicker((currentValue) => !currentValue);
                 }}
                 className="rounded px-1.5 py-0.5 text-xs text-ink-3 hover:text-ink"
               >
-                😊+
+                + Reaction
               </button>
               {onReply && (
                 <button

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon, CloseIcon, InfoIcon } from "@/components/icons";
 import { api } from "@/lib/api";
 import type { ApiConversation } from "@/lib/api";
 import { useChatStore } from "@/store/chat-store";
@@ -28,9 +29,9 @@ export function DetailsPanel({
   const [memberFilter, setMemberFilter] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const users = useChatStore((s) => s.users);
-  const presence = useChatStore((s) => s.presence);
-  const identity = useChatStore((s) => s.identity);
+  const users = useChatStore((state) => state.users);
+  const presence = useChatStore((state) => state.presence);
+  const identity = useChatStore((state) => state.identity);
   // Member removal (#35/#37): admin removes others; any member can leave.
   // Hooks BEFORE the early return — unconditional order.
   const [confirmingRemove, setConfirmingRemove] = useState<string | null>(null);
@@ -44,9 +45,9 @@ export function DetailsPanel({
         onClick={() => {
           setCollapsed(false);
         }}
-        className="w-10 shrink-0 border-l border-line text-ink-3 transition-colors duration-fast hover:bg-raised"
+        className="flex w-11 shrink-0 items-center justify-center border-l border-line bg-surface/80 text-ink-3 transition-colors duration-fast hover:bg-raised hover:text-ink"
       >
-        ‹
+        <ChevronLeftIcon className="h-4 w-4" />
       </button>
     );
   }
@@ -59,8 +60,8 @@ export function DetailsPanel({
           <h3 className="text-sm font-semibold">Details</h3>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-          <span aria-hidden className="text-3xl">
-            ℹ️
+          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-raised text-brand-strong">
+            <InfoIcon className="h-6 w-6" />
           </span>
           <p className="mt-2 text-sm font-medium text-ink-2">No conversation selected</p>
           <p className="mt-1 text-xs text-ink-3">
@@ -75,7 +76,9 @@ export function DetailsPanel({
   // delete the group — derived from the immutable member role, not labels.
   const isAdmin =
     identity !== null &&
-    (conversation.members ?? []).some((m) => m.userId === identity.userId && m.role === "ADMIN");
+    (conversation.members ?? []).some(
+      (member) => member.userId === identity.userId && member.role === "ADMIN",
+    );
 
   // Member removal (#35/#37) — state declared above the early return.
   const removeMember = async (userId: string): Promise<void> => {
@@ -110,12 +113,12 @@ export function DetailsPanel({
   };
 
   const members = conversation.members ?? [];
-  const memberIds = new Set(members.map((m) => m.userId));
+  const memberIds = new Set(members.map((member) => member.userId));
   const nonMembers = users.filter(
-    (u) =>
-      !memberIds.has(u.id) &&
+    (user) =>
+      !memberIds.has(user.id) &&
       (memberFilter.trim() === "" ||
-        u.displayName.toLowerCase().includes(memberFilter.trim().toLowerCase())),
+        user.displayName.toLowerCase().includes(memberFilter.trim().toLowerCase())),
   );
   const peer = members.find((member) => member.userId !== identity?.userId);
   const directDisplayName =
@@ -140,8 +143,8 @@ export function DetailsPanel({
   };
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l border-line bg-surface">
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
+    <aside className="glass-surface flex w-80 shrink-0 flex-col border-l border-line">
+      <div className="flex min-h-16 items-center justify-between border-b border-line px-4">
         <h3 className="text-sm font-semibold">Details</h3>
         <div className="flex items-center gap-1">
           {onClose ? (
@@ -149,9 +152,9 @@ export function DetailsPanel({
               type="button"
               aria-label="Close details"
               onClick={onClose}
-              className="rounded px-1.5 text-ink-3 hover:bg-raised hover:text-ink lg:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-xl text-ink-3 hover:bg-raised hover:text-ink lg:hidden"
             >
-              ✕
+              <CloseIcon className="h-4 w-4" />
             </button>
           ) : null}
           <button
@@ -160,9 +163,9 @@ export function DetailsPanel({
             onClick={() => {
               setCollapsed(true);
             }}
-            className="hidden rounded px-1.5 text-ink-3 hover:bg-raised hover:text-ink lg:block"
+            className="hidden h-10 w-10 items-center justify-center rounded-xl text-ink-3 hover:bg-raised hover:text-ink lg:flex"
           >
-            ›
+            <ChevronRightIcon className="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -199,7 +202,7 @@ export function DetailsPanel({
               aria-label="Add member"
               data-testid="add-member-toggle"
               onClick={() => {
-                setAddingMember((v) => !v);
+                setAddingMember((currentValue) => !currentValue);
                 if (addingMember) setMemberFilter("");
               }}
               className="rounded-md bg-brand px-2 py-0.5 text-[11px] font-semibold text-on-brand transition-colors duration-fast hover:bg-brand-strong"
@@ -224,18 +227,18 @@ export function DetailsPanel({
               {nonMembers.length === 0 && (
                 <li className="px-1.5 py-1 text-xs text-ink-3">Everyone is already here</li>
               )}
-              {nonMembers.map((u) => (
-                <li key={u.id}>
+              {nonMembers.map((user) => (
+                <li key={user.id}>
                   <button
                     type="button"
                     disabled={addBusy}
                     onClick={() => {
-                      void addMember(u.id);
+                      void addMember(user.id);
                     }}
                     className="flex w-full items-center gap-2 truncate rounded-md px-1.5 py-1 text-left text-sm transition-colors duration-fast hover:bg-raised disabled:opacity-50"
                   >
-                    <Avatar name={u.displayName} colorKey={u.id} size="sm" />
-                    <span className="truncate">{u.displayName}</span>
+                    <Avatar name={user.displayName} colorKey={user.id} size="sm" />
+                    <span className="truncate">{user.displayName}</span>
                   </button>
                 </li>
               ))}
@@ -246,41 +249,41 @@ export function DetailsPanel({
         <ul className="mt-2 space-y-0.5">
           {/* Defensive: tolerate an incomplete conversation payload (missing
               members) instead of crashing the whole chat page. */}
-          {members.map((m) => {
-            const user = users.find((u) => u.id === m.userId);
-            const isSelf = m.userId === identity?.userId;
+          {members.map((member) => {
+            const user = users.find((candidate) => candidate.id === member.userId);
+            const isSelf = member.userId === identity?.userId;
             const display = isSelf ? "You" : (user?.displayName ?? "Member");
             const canRemove = conversation.type === "GROUP" && (isAdmin ? !isSelf : isSelf); // admin removes others; anyone leaves self (#37/#38)
             return (
               <li
-                key={m.userId}
+                key={member.userId}
                 className="flex min-h-10 items-center gap-2.5 rounded-lg px-1.5 py-1 text-sm"
               >
                 {/* Avatar hashes the REAL name (never the "You" label) so a
                     member's color matches everywhere. */}
                 <Avatar
-                  name={user?.displayName ?? m.userId}
-                  colorKey={m.userId}
+                  name={user?.displayName ?? member.userId}
+                  colorKey={member.userId}
                   size="sm"
-                  online={presence[m.userId]}
+                  online={presence[member.userId]}
                 />
                 <span className="min-w-0 flex-1 truncate">{display}</span>
                 {/* Role + action live in ONE consistent row (§22). */}
-                {m.role === "ADMIN" && (
+                {member.role === "ADMIN" && (
                   <span className="rounded bg-brand-soft px-1.5 py-px text-[10px] font-semibold text-brand-strong">
                     Admin
                   </span>
                 )}
                 {canRemove &&
-                  (confirmingRemove === m.userId ? (
+                  (confirmingRemove === member.userId ? (
                     <span className="flex items-center gap-1">
                       <button
                         type="button"
-                        aria-label={`Confirm remove ${user?.displayName ?? m.userId}`}
-                        data-testid={`confirm-remove-${m.userId}`}
+                        aria-label={`Confirm remove ${user?.displayName ?? member.userId}`}
+                        data-testid={`confirm-remove-${member.userId}`}
                         disabled={removeBusy}
                         onClick={() => {
-                          void removeMember(m.userId);
+                          void removeMember(member.userId);
                         }}
                         className="rounded bg-danger-strong px-1.5 py-0.5 text-[10px] font-semibold text-on-brand hover:opacity-90 disabled:opacity-50"
                       >
@@ -301,11 +304,11 @@ export function DetailsPanel({
                     <button
                       type="button"
                       aria-label={
-                        isSelf ? "Leave group" : `Remove ${user?.displayName ?? m.userId}`
+                        isSelf ? "Leave group" : `Remove ${user?.displayName ?? member.userId}`
                       }
-                      data-testid={`remove-member-${m.userId}`}
+                      data-testid={`remove-member-${member.userId}`}
                       onClick={() => {
-                        setConfirmingRemove(m.userId);
+                        setConfirmingRemove(member.userId);
                       }}
                       className="rounded px-1.5 py-1 text-[11px] font-medium text-ink-3 transition-colors duration-fast hover:text-danger"
                     >

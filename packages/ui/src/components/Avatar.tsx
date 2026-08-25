@@ -1,5 +1,5 @@
-import { cn } from "../cn";
 import { initialsFromDisplayName, avatarColorHex } from "@mqtt-chat/realtime-core";
+import { cn } from "../cn";
 
 export interface AvatarProps {
   /** Initials source — display name (never affects the color). */
@@ -23,7 +23,6 @@ const sizeClasses = {
 } as const;
 
 export function Avatar({ name, colorKey, size = "md", online, className }: AvatarProps) {
-  // Shared canonical presentation — same hash + palette as mobile.
   const background = avatarColorHex(colorKey);
   const initials = initialsFromDisplayName(name);
 
@@ -33,7 +32,7 @@ export function Avatar({ name, colorKey, size = "md", online, className }: Avata
         aria-hidden="true"
         style={{ backgroundColor: background }}
         className={cn(
-          "inline-flex items-center justify-center rounded-full font-semibold text-white select-none",
+          "inline-flex items-center justify-center rounded-full font-semibold text-white select-none ring-1 ring-white/10 shadow-sm",
           sizeClasses[size],
         )}
       >
@@ -44,8 +43,8 @@ export function Avatar({ name, colorKey, size = "md", online, className }: Avata
           role="status"
           aria-label={online ? "online" : "offline"}
           className={cn(
-            "absolute right-0 bottom-0 h-3 w-3 rounded-full border-2 border-white dark:border-slate-900",
-            online ? "bg-emerald-500" : "bg-slate-400",
+            "absolute right-0 bottom-0 h-3 w-3 rounded-full border-2 border-surface",
+            online ? "bg-presence" : "bg-ink-3",
           )}
         />
       )}

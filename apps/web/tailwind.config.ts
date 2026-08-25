@@ -1,12 +1,6 @@
 import type { Config } from "tailwindcss";
 
-/**
- * Semantic design tokens (phase-2 §4/§5): every color the app uses resolves
- * to a CSS variable defined in globals.css (dark default + light via
- * prefers-color-scheme). Components use these aliases — never raw slate/
- * indigo utilities — so the theme flips without touching markup and web
- * matches the mobile token values exactly.
- */
+/** Semantic aliases shared by the Web UI and packages/ui components. */
 const config: Config = {
   darkMode: "class",
   content: ["./src/**/*.{ts,tsx}", "../../packages/ui/src/**/*.{ts,tsx}"],
@@ -32,7 +26,14 @@ const config: Config = {
           soft: "var(--brand-soft)",
         },
         "on-brand": "var(--on-brand)",
-        ok: "var(--ok)",
+        accent: {
+          DEFAULT: "var(--accent)",
+          soft: "var(--accent-soft)",
+        },
+        ok: {
+          DEFAULT: "var(--ok)",
+          soft: "var(--ok-soft)",
+        },
         warn: "var(--warn)",
         danger: {
           DEFAULT: "var(--danger)",
@@ -46,6 +47,10 @@ const config: Config = {
         fast: "var(--motion-fast)",
         normal: "var(--motion-normal)",
         slow: "var(--motion-slow)",
+      },
+      boxShadow: {
+        panel: "0 18px 55px rgba(1, 7, 18, 0.18)",
+        floating: "0 20px 60px rgba(1, 7, 18, 0.32)",
       },
       zIndex: {
         banner: "60",

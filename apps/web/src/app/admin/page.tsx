@@ -286,7 +286,7 @@ function BotPanel({
     <section className="space-y-4">
       <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div>
-          <p className="font-medium">🤖 {bot.name}</p>
+          <p className="font-medium">BOT · {bot.name}</p>
           <p className="text-xs text-slate-400">{bot.id}</p>
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm">
