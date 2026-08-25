@@ -427,9 +427,11 @@ export class ChatRealtimeClient {
   /**
    * Tear down the current session completely (socket closed, state cleared)
    * so a subsequent connect() builds a fresh session — required for identity
-   * switching, never reuse a session across identities.
+   * switching, never reuse a session across identities. Graceful by default:
+   * callers already publish presence=false, and a forced socket close would
+   * additionally fire the LWT and duplicate the canonical offline event.
    */
-  async disconnect(force = true): Promise<void> {
+  async disconnect(force = false): Promise<void> {
     const client = this.client;
     this.client = null;
     this.subscribedConversations.clear();
