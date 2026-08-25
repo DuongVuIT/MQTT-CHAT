@@ -372,6 +372,7 @@ const PendingRow = React.memo(function PendingRow({
 
 export function ChatScreen({
   title,
+  conversationId,
   subtitle,
   peerInitials,
   messages,
@@ -394,6 +395,8 @@ export function ChatScreen({
   onOpenDetails,
 }: {
   title: string;
+  /** Stable conversation id — the canonical avatar color key (REG-05). */
+  conversationId: string;
   subtitle?: string;
   /** Peer/group initials for the header avatar. */
   peerInitials: string;
@@ -590,7 +593,9 @@ export function ChatScreen({
   );
 
   const canSend = draft.trim().length > 0 || editing !== null;
-  const avatar = avatarColorFor(title);
+  // Canonical color key = stable conversation id, never the display title
+  // (REG-05 parity with web).
+  const avatar = avatarColorFor(conversationId);
 
   return (
     <KeyboardAvoidingView

@@ -14,6 +14,7 @@ import {
   normalizeMediaType,
   resolveMediaType,
 } from '@mqtt-chat/mqtt-contracts';
+import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
 import { api } from '../lib/api';
 import { useChatSession, type Identity } from '../hooks/useChatSession';
 import { IdentityPickerScreen } from '../screens/IdentityPickerScreen';
@@ -64,8 +65,8 @@ function conversationTitle(
 }
 
 function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map(p => p.slice(0, 1).toUpperCase()).join('');
+  // Shared canonical initials rule — identical to web's Avatar (REG-05).
+  return initialsFromDisplayName(name);
 }
 
 /**
@@ -121,6 +122,18 @@ export function AppRoot() {
   useEffect(() => {
     if (ghostRoute && identity) setRoute({ screen: 'list' });
   }, [ghostRoute, identity]);
+
+  // Viewing catch-up (REG-02): messages arriving while the chat screen stays
+  // open must be marked read — parity with web's transcript effect. The
+  // monotonic throttle inside markVisibleRead keeps this cheap.
+  const viewedConversationId =
+    route.screen === 'chat' ? route.conversationId : null;
+  useEffect(() => {
+    if (!viewedConversationId || !identity) return;
+    const list = session.messagesByConv[viewedConversationId];
+    const latest = list?.length ? (list[list.length - 1]?.sequence ?? 0) : 0;
+    if (latest > 0) session.markVisibleRead(viewedConversationId, latest);
+  }, [viewedConversationId, session, identity]);
 
   if (loading) {
     return (
@@ -404,6 +417,7 @@ export function AppRoot() {
     <View style={styles.root}>
       <ChatScreen
         title={route.title}
+        conversationId={route.conversationId}
         subtitle={route.subtitle ?? undefined}
         peerInitials={initialsOf(peerName)}
         messages={session.messagesByConv[route.conversationId] ?? []}
