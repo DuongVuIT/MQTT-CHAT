@@ -32,6 +32,10 @@ const TEST_DB =
 const TEST_API_PORT = process.env.TEST_API_PORT ?? "3011";
 const TEST_API = `http://localhost:${TEST_API_PORT}/api`;
 const TEST_REDIS = process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1";
+// Client-simulation suites connect directly to EMQX. They must not depend on
+// a separately running dev gateway at :3000 (that dependency previously hid
+// behind an orphaned `pnpm dev` process and produced a false-green baseline).
+const TEST_MQTT_WS = process.env.TEST_MQTT_WS_URL ?? "ws://localhost:8083/mqtt";
 /** Topic-subtree fence: E2E traffic never mixes with a live dev broker. */
 const TEST_NS = process.env.TEST_MQTT_NAMESPACE ?? "chat/v1-e2e";
 
@@ -320,6 +324,7 @@ if (
         env: {
           ...process.env,
           API_URL: api,
+          MQTT_WS_URL: TEST_MQTT_WS,
           MQTT_TOPIC_NAMESPACE: TEST_NS,
           REDIS_URL: TEST_REDIS,
         },
