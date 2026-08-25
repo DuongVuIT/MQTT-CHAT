@@ -96,7 +96,11 @@ export class MessageLifecycleStore {
   }
 
   applyHistory(messages: ApiMessage[]): void {
-    for (const m of messages) this.messages.set(m.id, m);
+    // A history response can race a newer canonical event. Never replace an
+    // already-reconciled row with the older request snapshot.
+    for (const m of messages) {
+      if (!this.messages.has(m.id)) this.messages.set(m.id, m);
+    }
   }
 
   markFailed(clientMessageId: string): void {

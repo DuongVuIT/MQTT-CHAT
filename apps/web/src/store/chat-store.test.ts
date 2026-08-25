@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { republishPayload, useChatStore } from "./chat-store";
 import type { ApiConversation, ApiMessage } from "../lib/api";
 
@@ -96,6 +96,25 @@ describe("chat-store message lifecycle", () => {
     s.upsertMessage({ ...sampleMessage("m1", "c1"), sequence: 1 });
     const list = useChatStore.getState().messagesByConversation["conv-general"];
     expect(list!.map((m) => m.sequence)).toEqual([1, 2]);
+  });
+});
+
+describe("identity-scoped ephemeral cleanup", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("cancels delayed presence updates when transient state resets", () => {
+    vi.useFakeTimers();
+    useChatStore.setState({
+      identity: { userId: "alice", deviceId: "web-a" },
+      presence: { alice: true },
+    });
+    useChatStore.getState().setPresence("alice", false);
+    useChatStore.getState().resetTransient();
+    useChatStore.getState().setIdentity({ userId: "bob", deviceId: "web-b" });
+
+    vi.advanceTimersByTime(10_000);
+
+    expect(useChatStore.getState().presence).toEqual({});
   });
 });
 

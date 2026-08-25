@@ -6,6 +6,7 @@ import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
 import { MessageBubble } from "@/components/MessageBubble";
 import { buildChatRows } from "@/lib/message-rows";
+import { mergeMessageSnapshot } from "@mqtt-chat/realtime-core";
 
 /**
  * Message list v2: cursor pagination, canonical scroll model, anchor
@@ -66,6 +67,7 @@ export function MessageList({
   const conversations = useChatStore((s) => s.conversations);
   const hasMore = useChatStore((s) => s.hasMoreHistory[conversationId] ?? false);
   const loadingHistory = useChatStore((s) => s.loadingHistory);
+  const connectionState = useChatStore((s) => s.connectionState);
 
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -111,7 +113,12 @@ export function MessageList({
       try {
         const res = await api.getMessages(conversationId, { limit: PAGE_SIZE });
         if (cancelled) return;
-        useChatStore.getState().setMessages(conversationId, res.messages, res.hasMore);
+        // Events may arrive after this request starts but before it resolves.
+        // Install the snapshot as a base and let the already-applied canonical
+        // rows win by id, so history can never erase a live create/edit/delete.
+        const store = useChatStore.getState();
+        const live = store.messagesByConversation[conversationId] ?? [];
+        store.setMessages(conversationId, mergeMessageSnapshot(res.messages, live), res.hasMore);
       } catch (error) {
         if (!cancelled) {
           setLoadError(error instanceof Error ? error.message : "Failed to load history");
@@ -234,22 +241,54 @@ export function MessageList({
   // reactions and gap-merges change the array identity without changing the
   // sequence and must not spam QoS1 publishes (§ perf).
   const lastPublishedReadRef = useRef(0);
+  const inFlightReadRef = useRef<{ conversationId: string; sequence: number } | null>(null);
+  useEffect(() => {
+    lastPublishedReadRef.current = 0;
+    inFlightReadRef.current = null;
+  }, [conversationId]);
   useEffect(() => {
     if (!identity || !messages?.length) return;
+    if (connectionState !== "connected") return;
     if (!stickToBottomRef.current) return;
     const lastSeq = messages[messages.length - 1]?.sequence ?? 0;
-    if (lastSeq === 0 || lastSeq <= lastPublishedReadRef.current) return;
-    lastPublishedReadRef.current = lastSeq;
-    getRealtimeService().publishCommand("receipt.read", {
-      conversationId,
-      lastReadSequence: lastSeq,
-    });
+    if (
+      lastSeq === 0 ||
+      lastSeq <= lastPublishedReadRef.current ||
+      (inFlightReadRef.current?.conversationId === conversationId &&
+        lastSeq <= inFlightReadRef.current.sequence)
+    )
+      return;
+    inFlightReadRef.current = { conversationId, sequence: lastSeq };
+    void getRealtimeService()
+      .publishCommandAsync("receipt.read", {
+        conversationId,
+        lastReadSequence: lastSeq,
+      })
+      .then(() => {
+        if (inFlightReadRef.current?.conversationId === conversationId) {
+          lastPublishedReadRef.current = Math.max(lastPublishedReadRef.current, lastSeq);
+        }
+      })
+      .catch(() => {
+        // Keep the watermark retryable. A reconnect changes connectionState
+        // and re-runs this effect; persistence failure cannot be hidden behind
+        // an optimistic badge clear.
+        useChatStore.getState().setError("Read receipt could not be synchronized");
+      })
+      .finally(() => {
+        if (
+          inFlightReadRef.current?.conversationId === conversationId &&
+          inFlightReadRef.current.sequence === lastSeq
+        ) {
+          inFlightReadRef.current = null;
+        }
+      });
     // Advance OUR OWN watermark locally — the server only echoes receipt.read
     // to members' user topics for cross-device convergence; without this the
     // sidebar badge derived from `lastSequence − myRead` stayed stale until
     // the next refetch (REG-02). Monotonic via the shared merge.
     useChatStore.getState().applyReadReceipt(conversationId, identity.userId, lastSeq);
-  }, [conversationId, identity, messages]);
+  }, [connectionState, conversationId, identity, messages]);
 
   const scrollToLatest = (behavior: ScrollBehavior): void => {
     stickToBottomRef.current = true;

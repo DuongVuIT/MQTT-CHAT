@@ -158,6 +158,27 @@ export class RealtimeService {
     void core.publishCommand(commandType, data, qos).catch(() => {});
   }
 
+  /** Critical commands (notably durable read receipts) need delivery errors
+   *  surfaced so callers can retain/retry their local watermark. */
+  publishCommandAsync(
+    commandType:
+      | "message.send"
+      | "message.edit"
+      | "message.delete"
+      | "reaction.add"
+      | "reaction.remove"
+      | "receipt.read"
+      | "receipt.delivered"
+      | "presence.set"
+      | "typing.set",
+    data: Record<string, unknown>,
+    qos: 0 | 1 = MQTT_QOS.command,
+  ): Promise<void> {
+    const core = this.core;
+    if (!core) return Promise.reject(new Error("MQTT session unavailable"));
+    return core.publishCommand(commandType, data, qos);
+  }
+
   /** Full teardown — graceful offline announce, socket closed, state cleared. */
   async disconnect(): Promise<void> {
     const core = this.core;

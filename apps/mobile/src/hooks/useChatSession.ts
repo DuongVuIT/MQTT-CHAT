@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChatRealtimeClient,
+  mergeMessageSnapshot,
   normalizeMessage,
   type ConnectionStatus,
   type RealtimeEvent,
@@ -49,6 +50,9 @@ export interface Identity {
  * typing indicator and read receipts.
  */
 export function useChatSession(identity: Identity | null) {
+  const identityKey = identity
+    ? `${identity.userId}:${identity.deviceId}`
+    : null;
   const [status, setStatus] = useState<ConnectionStatus>('offline');
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
@@ -80,6 +84,8 @@ export function useChatSession(identity: Identity | null) {
     Record<string, boolean>
   >({});
   const [error, setError] = useState<string | null>(null);
+  // REST bootstrap starts only after MQTT subscriptions have SUBACKed.
+  const [realtimeReadyKey, setRealtimeReadyKey] = useState<string | null>(null);
 
   const clientRef = useRef<ChatRealtimeClient | null>(null);
   // Typing throttle state (#192): per-conversation last `started` publish and
@@ -95,6 +101,9 @@ export function useChatSession(identity: Identity | null) {
     new Map<string, ReturnType<typeof setTimeout>>(),
   );
   const lifecycleRef = useRef<MessageLifecycleStore | null>(null);
+  const bootstrapReadyRef = useRef(false);
+  const bufferedEventsRef = useRef<RealtimeEvent[]>([]);
+  const eventHandlerRef = useRef<((event: RealtimeEvent) => void) | null>(null);
 
   // Latest-conversations mirror: lets callbacks that only need to ENUMERATE
   // conversations stay reference-stable. Historical perf bug: refreshPending
@@ -135,6 +144,10 @@ export function useChatSession(identity: Identity | null) {
     setLoadingEarlierByConv({});
     setLoadingHistoryByConv({});
     setError(null);
+    setRealtimeReadyKey(null);
+    bootstrapReadyRef.current = false;
+    bufferedEventsRef.current = [];
+    eventHandlerRef.current = null;
     lastVisibleReadRef.current = new Map();
     typingSeenRef.current.clear();
     for (const t of presenceGraceTimersRef.current.values()) clearTimeout(t);
@@ -164,7 +177,18 @@ export function useChatSession(identity: Identity | null) {
           lastReadSequence: sequence,
         }),
       );
-      clientRef.current?.markRead(conversationId, sequence).catch(() => {});
+      const client = clientRef.current;
+      if (!client) {
+        seen.delete(conversationId);
+        return;
+      }
+      void client.markRead(conversationId, sequence).catch(() => {
+        // Optimistic UI remains monotonic, but the durable watermark stays
+        // retryable on the next view/reconnect instead of being silently
+        // considered published forever.
+        if (seen.get(conversationId) === sequence) seen.delete(conversationId);
+        setError('Read receipt could not be synchronized');
+      });
     },
     [identity],
   );
@@ -229,9 +253,11 @@ export function useChatSession(identity: Identity | null) {
     [],
   );
 
-  // Bootstrap: users + conversations + presence snapshot.
+  // Bootstrap barrier: subscribe first, then install REST snapshots, then
+  // replay canonical events buffered during the fetch. A slower REST response
+  // can therefore never overwrite a newer MQTT projection.
   useEffect(() => {
-    if (!identity) return;
+    if (!identity || realtimeReadyKey !== identityKey) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -261,6 +287,11 @@ export function useChatSession(identity: Identity | null) {
             );
           }
         }
+        if (cancelled) return;
+        bootstrapReadyRef.current = true;
+        for (const event of bufferedEventsRef.current.splice(0)) {
+          eventHandlerRef.current?.(event);
+        }
       } catch (e) {
         if (!cancelled)
           setError(e instanceof Error ? e.message : 'bootstrap failed');
@@ -269,11 +300,12 @@ export function useChatSession(identity: Identity | null) {
     return () => {
       cancelled = true;
     };
-  }, [identity]);
+  }, [identity, identityKey, realtimeReadyKey]);
 
   // Realtime connection — created once per identity, handlers for page lifetime.
   useEffect(() => {
-    if (!identity) return;
+    if (!identity || !identityKey) return;
+    let cancelled = false;
     const store = new MessageLifecycleStore(
       async p => {
         await clientRef.current?.sendMessage({
@@ -530,6 +562,7 @@ export function useChatSession(identity: Identity | null) {
           break;
       }
     };
+    eventHandlerRef.current = handleEvent;
 
     const client = new ChatRealtimeClient({
       url: MQTT_WS_URL,
@@ -551,7 +584,12 @@ export function useChatSession(identity: Identity | null) {
         }),
         qos: 1,
       },
-      onStatus: setStatus,
+      onStatus: nextStatus => {
+        if (nextStatus === 'reconnecting' || nextStatus === 'offline') {
+          bootstrapReadyRef.current = false;
+        }
+        setStatus(nextStatus);
+      },
       // Announce presence after every (re)connect — otherwise this device
       // never appears online to peers (web does the same in its shell).
       onConnect: () => {
@@ -559,22 +597,37 @@ export function useChatSession(identity: Identity | null) {
           /* transient — next reconnect retries */
         });
       },
-      onEvent: handleEvent,
+      onEvent: event => {
+        if (!bootstrapReadyRef.current) bufferedEventsRef.current.push(event);
+        else handleEvent(event);
+      },
     });
     clientRef.current = client;
-    void client.connect().catch((e: unknown) => {
-      setError(e instanceof Error ? e.message : 'MQTT connect failed');
-    });
+    void client
+      .connect()
+      .then(() => {
+        if (!cancelled) setRealtimeReadyKey(identityKey);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled)
+          setError(e instanceof Error ? e.message : 'MQTT connect failed');
+      });
 
     return () => {
+      cancelled = true;
+      bootstrapReadyRef.current = false;
+      bufferedEventsRef.current = [];
+      eventHandlerRef.current = null;
       // Graceful teardown announces offline before the socket closes.
       void client
         .setPresence(false)
         .catch(() => {})
         .finally(() => client.disconnect());
+      store.dispose();
+      if (lifecycleRef.current === store) lifecycleRef.current = null;
       clientRef.current = null;
     };
-  }, [identity, applyPresence, bumpPending]);
+  }, [identity, identityKey, applyPresence, bumpPending]);
 
   const openConversation = useCallback(
     async (conversationId: string) => {
@@ -589,10 +642,15 @@ export function useChatSession(identity: Identity | null) {
       try {
         const res = await api.getMessages(conversationId);
         lifecycleRef.current?.applyHistory(res.messages);
-        setMessagesByConv(prev => ({
-          ...prev,
-          [conversationId]: res.messages,
-        }));
+        setMessagesByConv(prev => {
+          const live = prev[conversationId] ?? [];
+          // Canonical events received after the request started are newer
+          // than the snapshot and win by id; unique live rows are retained.
+          return {
+            ...prev,
+            [conversationId]: mergeMessageSnapshot(res.messages, live),
+          };
+        });
         setHasMoreByConv(prev => ({
           ...prev,
           [conversationId]: res.hasMore,
@@ -822,44 +880,57 @@ export function useChatSession(identity: Identity | null) {
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
-    if (status !== 'connected' || prev === 'connected') return;
+    if (
+      status !== 'connected' ||
+      (prev !== 'reconnecting' && prev !== 'offline')
+    )
+      return;
     // Flush messages queued while offline (bounded by the lifecycle timeout;
     // publish failures inside flush are caught and marked failed).
     void lifecycleRef.current?.flushQueued().catch(() => {
       /* per-message failures already marked failed */
     });
-    // Heal the conversation LIST too: reuse/adoption DM creates emit no
-    // realtime event, and QoS1 can drop list mutations published while
-    // offline. Web heals the same way after reconnect.
-    void refreshConversations();
     const opened = [...openedConvsRef.current];
-    if (opened.length === 0) return;
     let cancelled = false;
     void (async () => {
-      for (const cid of opened) {
-        try {
-          // Watermark as of NOW (messages may keep arriving mid-heal; the
-          // upsert merge keeps anything newer).
-          const cached = messagesByConvRef.current[cid] ?? [];
-          const watermark = cached[cached.length - 1]?.sequence ?? 0;
-          const res = await api.getMessages(
-            cid,
-            watermark > 0 ? { after: watermark } : undefined,
-          );
-          if (cancelled) return;
-          lifecycleRef.current?.applyHistory(res.messages);
-          setMessagesByConv(prevMap => {
-            const list = prevMap[cid] ?? [];
-            const known = new Set(list.map(m => m.id));
-            const fresh = res.messages.filter(m => !known.has(m.id));
-            if (fresh.length === 0) return prevMap;
-            const merged = [...list, ...fresh].sort(
-              (a, b) => a.sequence - b.sequence,
+      try {
+        // Heal the conversation LIST too: reuse/adoption DM creates emit no
+        // realtime event, and QoS1 can drop list mutations while offline.
+        await refreshConversations();
+        for (const cid of opened) {
+          try {
+            // Watermark as of NOW (messages may keep arriving mid-heal; the
+            // upsert merge keeps anything newer).
+            const cached = messagesByConvRef.current[cid] ?? [];
+            const watermark = cached[cached.length - 1]?.sequence ?? 0;
+            const res = await api.getMessages(
+              cid,
+              watermark > 0 ? { after: watermark } : undefined,
             );
-            return { ...prevMap, [cid]: merged };
-          });
-        } catch {
-          // Keep stale data; next reconnect retries.
+            if (cancelled) return;
+            lifecycleRef.current?.applyHistory(res.messages);
+            setMessagesByConv(prevMap => {
+              const list = prevMap[cid] ?? [];
+              const known = new Set(list.map(m => m.id));
+              const fresh = res.messages.filter(m => !known.has(m.id));
+              if (fresh.length === 0) return prevMap;
+              const merged = [...list, ...fresh].sort(
+                (a, b) => a.sequence - b.sequence,
+              );
+              return { ...prevMap, [cid]: merged };
+            });
+          } catch {
+            // Keep stale data; next reconnect retries.
+          }
+        }
+      } catch {
+        // Keep current projection; the next reconnect retries the list heal.
+      } finally {
+        if (!cancelled) {
+          bootstrapReadyRef.current = true;
+          for (const event of bufferedEventsRef.current.splice(0)) {
+            eventHandlerRef.current?.(event);
+          }
         }
       }
     })();

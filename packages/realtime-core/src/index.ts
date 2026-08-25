@@ -15,6 +15,7 @@
 import mqtt, { type MqttClient } from "mqtt";
 import {
   COMMAND_TOPICS,
+  eventEnvelopeSchema,
   MQTT_QOS,
   SUBSCRIPTION_PATTERNS,
   userEventsWildcardTopic,
@@ -232,6 +233,20 @@ export function normalizeMessage(raw: unknown): NormalizedMessage {
   };
 }
 
+/**
+ * Install a REST history snapshot without erasing canonical events that were
+ * applied after the request started. Snapshot rows form the base; live rows
+ * win by id and unique live rows remain. Sequence is the canonical ordering.
+ */
+export function mergeMessageSnapshot<T extends { id: string; sequence: number }>(
+  snapshot: readonly T[],
+  live: readonly T[],
+): T[] {
+  const merged = new Map(snapshot.map((message) => [message.id, message]));
+  for (const message of live) merged.set(message.id, message);
+  return [...merged.values()].sort((a, b) => a.sequence - b.sequence);
+}
+
 /** MQTT LWT — published by the broker on abrupt disconnect. */
 export interface RealtimeWill {
   topic: string;
@@ -332,26 +347,54 @@ export class ChatRealtimeClient {
 
       let settled = false;
 
-      const restoreSubscriptions = (): void => {
-        for (const pattern of [...BASE_EVENT_WILDCARDS, ...(this.opts.extraEventWildcards ?? [])]) {
-          client.subscribe(pattern, { qos: 1 });
-        }
+      const restoreSubscriptions = async (): Promise<void> => {
+        const patterns = [...BASE_EVENT_WILDCARDS, ...(this.opts.extraEventWildcards ?? [])];
         if (this.opts.subscribeUserEvents !== false) {
-          client.subscribe(userEventsWildcardTopic(identity.userId), { qos: 1 });
+          patterns.push(userEventsWildcardTopic(identity.userId));
         }
+        await Promise.all(
+          [...new Set(patterns)].map(
+            (pattern) =>
+              new Promise<void>((subscriptionResolve, subscriptionReject) => {
+                client.subscribe(pattern, { qos: 1 }, (error) =>
+                  error ? subscriptionReject(error) : subscriptionResolve(),
+                );
+              }),
+          ),
+        );
       };
 
       client.on("connect", () => {
-        restoreSubscriptions();
-        this.opts.onConnect?.();
-        onStatus?.("connected");
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
+        // MQTT's socket-level `connect` fires before subscription grants are
+        // acknowledged. Do not expose a ready state until every canonical
+        // event topic has a SUBACK, otherwise REST bootstrap can begin inside
+        // a real event-loss window.
+        void restoreSubscriptions()
+          .then(() => {
+            if (this.client !== client) return;
+            this.opts.onConnect?.();
+            onStatus?.("connected");
+            if (!settled) {
+              settled = true;
+              resolve();
+            }
+          })
+          .catch((error: unknown) => {
+            if (!settled) {
+              settled = true;
+              reject(error instanceof Error ? error : new Error("MQTT subscription failed"));
+            }
+            client.end(true);
+          });
       });
       client.on("reconnect", () => onStatus?.("reconnecting"));
-      client.on("close", () => onStatus?.("offline"));
+      client.on("close", () => {
+        onStatus?.("offline");
+        if (!settled) {
+          settled = true;
+          reject(new Error("MQTT connection closed before subscriptions were ready"));
+        }
+      });
       client.on("error", (err) => {
         if (!settled && !client.connected) {
           settled = true;
@@ -360,12 +403,10 @@ export class ChatRealtimeClient {
       });
       client.on("message", (_topic, payload) => {
         try {
-          const parsed = JSON.parse(payload.toString()) as RealtimeEvent;
-          if (parsed && typeof parsed.eventType === "string") {
-            this.opts.onEvent?.(parsed);
-          }
+          const parsed = eventEnvelopeSchema.parse(JSON.parse(payload.toString()));
+          this.opts.onEvent?.(parsed as RealtimeEvent);
         } catch {
-          /* ignore malformed payloads */
+          /* Reject malformed broker payloads at the shared client boundary. */
         }
       });
     });

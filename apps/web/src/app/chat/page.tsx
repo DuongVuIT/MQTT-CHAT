@@ -36,7 +36,6 @@ export default function ChatPage() {
   const identityUserId = useChatStore((s) => s.identity?.userId);
   const users = useChatStore((s) => s.users);
   const connectionState = useChatStore((s) => s.connectionState);
-  const bootstrapped = useRef(false);
   // Previous transport state — used to detect reconnect transitions
   // (reconnecting/disconnected → connected) and trigger state recovery.
   const prevConnectionState = useRef<ConnectionState | null>(null);
@@ -52,11 +51,10 @@ export default function ChatPage() {
     setDetailsOpen(false);
   }, [activeConversationId]);
 
-  // Bootstrap: identity → REST data → MQTT connect → subscriptions.
+  // Subscribe first, then install the REST snapshot, then replay events that
+  // arrived while the snapshot was in flight. This closes both bootstrap
+  // races: fetch→subscribe event loss and stale REST overwriting live state.
   useEffect(() => {
-    if (bootstrapped.current) return;
-    bootstrapped.current = true;
-
     const identity = loadStoredIdentity();
     if (!identity) {
       router.replace("/");
@@ -72,38 +70,50 @@ export default function ChatPage() {
     useChatStore.getState().setIdentity(identity);
 
     const realtime = getRealtimeService();
-    // Handlers live for the page lifetime and are NOT unregistered on effect
-    // cleanup: React StrictMode (dev) double-invokes effects, and the cleanup
-    // of the first run would permanently detach them from the singleton
-    // realtime service while the second run early-returns on the bootstrap
-    // guard — leaving the UI stuck "Offline" and deaf to all events.
-    realtime.onState((state: ConnectionState) => {
+    let cancelled = false;
+    let buffering = true;
+    let initialSnapshotReady = false;
+    const bufferedEvents: EventEnvelope[] = [];
+    const replayBufferedEvents = (): void => {
+      buffering = false;
+      for (const envelope of bufferedEvents.splice(0)) handleEvent(envelope);
+    };
+    const unsubscribeState = realtime.onState((state: ConnectionState) => {
       const prevState = prevConnectionState.current;
       prevConnectionState.current = state;
       useChatStore.getState().setConnectionState(state);
+      if (state === "reconnecting" || state === "disconnected") buffering = true;
       // Reconnect recovery: a drop (reconnecting/disconnected) that returns to
       // "connected" means canonical events were missed while offline. Refetch
       // the conversation list and the active conversation's messages so the
       // UI converges with the server WITHOUT a manual reload — and flush any
       // sends that were QUEUED while offline (same clientMessageId).
-      if (state === "connected" && (prevState === "reconnecting" || prevState === "disconnected")) {
+      if (
+        initialSnapshotReady &&
+        state === "connected" &&
+        (prevState === "reconnecting" || prevState === "disconnected")
+      ) {
         flushQueuedMessages();
-        void recoverAfterReconnect();
+        void recoverAfterReconnect().finally(() => {
+          if (!cancelled) replayBufferedEvents();
+        });
       }
     });
-    realtime.onEvent((envelope: EventEnvelope) => {
-      // NO captured identity: the active identity is read from the store at
-      // event time so a user switch can never leave stale-perspective logic
-      // bound to the singleton realtime service.
-      handleEvent(envelope);
+    const unsubscribeEvent = realtime.onEvent((envelope: EventEnvelope) => {
+      if (buffering) bufferedEvents.push(envelope);
+      else handleEvent(envelope);
     });
 
     void (async () => {
       try {
+        // connect() resolves only after SUBACK for canonical + user topics.
+        await realtime.connect(identity);
+        if (cancelled) return;
         const [usersRes, convRes] = await Promise.all([
           api.listUsers(),
           api.listConversations(identity.userId),
         ]);
+        if (cancelled) return;
         const s = useChatStore.getState();
         s.setUsers(usersRes.users);
         s.setConversations(convRes.conversations);
@@ -120,15 +130,29 @@ export default function ChatPage() {
           // will refine it. Do NOT default to offline.
         }
 
-        await realtime.connect(identity);
         realtime.subscribeGlobal(identity.userId);
         for (const c of convRes.conversations) realtime.subscribeConversation(c.id);
+        initialSnapshotReady = true;
+        replayBufferedEvents();
       } catch (error) {
-        useChatStore
-          .getState()
-          .setError(error instanceof Error ? error.message : "Failed to initialize");
+        if (!cancelled) {
+          useChatStore
+            .getState()
+            .setError(error instanceof Error ? error.message : "Failed to initialize");
+        }
       }
     })();
+
+    return () => {
+      cancelled = true;
+      buffering = false;
+      bufferedEvents.length = 0;
+      unsubscribeEvent();
+      unsubscribeState();
+      prevConnectionState.current = null;
+      void realtime.disconnect();
+      useChatStore.getState().resetTransient();
+    };
   }, [router]);
 
   // Peer-relative DIRECT label: A sees B's name, B sees A's name.
@@ -289,7 +313,7 @@ function flushQueuedMessages(): void {
 }
 
 /** Route canonical events into the store. */
-function handleEvent(envelope: EventEnvelope): void {
+export function handleEvent(envelope: EventEnvelope): void {
   const s = useChatStore.getState();
   // Perspective is ALWAYS derived from the active identity at event time.
   const selfUserId = s.identity?.userId ?? "";
@@ -452,8 +476,9 @@ function handleEvent(envelope: EventEnvelope): void {
       );
       break;
     case "receipt.read": {
-      if (String(data["userId"]) === selfUserId) break;
-      // Update member read state in conversation list.
+      // Apply the canonical self event too: the worker fans it back so this
+      // user's other tabs/devices converge. The monotonic reducer makes the
+      // optimistic local echo and QoS1 redelivery harmless.
       s.applyReadReceipt(conversationId, String(data["userId"]), Number(data["lastReadSequence"]));
       break;
     }

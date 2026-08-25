@@ -201,6 +201,12 @@ const typingSeen = new Map<string, Map<string, number>>();
 // presence grace: userId → timer that will apply the offline flip
 const presenceGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+function clearEphemeralBookkeeping(): void {
+  typingSeen.clear();
+  for (const timer of presenceGraceTimers.values()) clearTimeout(timer);
+  presenceGraceTimers.clear();
+}
+
 export const useChatStore = create<ChatState>((set) => ({
   identity: null,
   users: [],
@@ -217,7 +223,11 @@ export const useChatStore = create<ChatState>((set) => ({
   error: null,
 
   setIdentity: (identity) => set({ identity }),
-  resetTransient: () =>
+  resetTransient: () => {
+    // Module-scoped timers outlive Zustand state. Clear them at the identity
+    // boundary or an old user's delayed offline flip can mutate the freshly
+    // selected user's session.
+    clearEphemeralBookkeeping();
     set({
       conversations: [],
       conversationsLoaded: false,
@@ -229,7 +239,8 @@ export const useChatStore = create<ChatState>((set) => ({
       hasMoreHistory: {},
       loadingHistory: false,
       error: null,
-    }),
+    });
+  },
   setUsers: (users) => set({ users }),
   setConversations: (conversations) => set({ conversations }),
   setConversationsLoaded: (conversationsLoaded) => set({ conversationsLoaded }),
