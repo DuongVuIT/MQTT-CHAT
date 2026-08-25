@@ -9,7 +9,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ApiConversation, ApiUser } from '../lib/api';
-import type { ConnectionStatus } from '@mqtt-chat/realtime-core';
+import {
+  initialsFromDisplayName,
+  type ConnectionStatus,
+} from '@mqtt-chat/realtime-core';
 import {
   avatarColorFor,
   colors,
@@ -187,7 +190,7 @@ export function ConversationListScreen({
           accessibilityLabel="Profile"
         >
           <Text style={styles.profileText}>
-            {(identityDisplayName ?? '?').slice(0, 1).toUpperCase()}
+            {initialsFromDisplayName(identityDisplayName)}
           </Text>
         </Pressable>
         <View style={styles.headerCenter}>

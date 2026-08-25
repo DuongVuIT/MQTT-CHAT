@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
 import { ScreenHeader } from '../components/ScreenHeader';
 import {
   avatarColorFor,
@@ -237,7 +238,7 @@ export function NewConversationScreen({
                       accessibilityLabel={`Remove ${u?.displayName ?? id}`}
                     >
                       <Text style={styles.chipText}>
-                        {(u?.displayName ?? '?').slice(0, 1).toUpperCase()}
+                        {initialsFromDisplayName(u?.displayName)}
                       </Text>
                       <Text style={styles.chipClose}>✕</Text>
                     </Pressable>
@@ -269,7 +270,7 @@ export function NewConversationScreen({
                 >
                   <View style={[styles.avatar, { backgroundColor: c.bg }]}>
                     <Text style={styles.avatarText}>
-                      {item.displayName.slice(0, 1).toUpperCase()}
+                      {initialsFromDisplayName(item.displayName)}
                     </Text>
                   </View>
                   <Text style={styles.name} numberOfLines={1}>
@@ -300,7 +301,7 @@ export function NewConversationScreen({
                   </View>
                   <View style={[styles.avatar, { backgroundColor: c.bg }]}>
                     <Text style={styles.avatarText}>
-                      {item.displayName.slice(0, 1).toUpperCase()}
+                      {initialsFromDisplayName(item.displayName)}
                     </Text>
                   </View>
                   <Text style={styles.name} numberOfLines={1}>

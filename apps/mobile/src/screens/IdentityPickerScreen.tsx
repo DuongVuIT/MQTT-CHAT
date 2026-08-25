@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
 import type { ApiUser } from '../lib/api';
 import {
   avatarColorFor,
@@ -61,7 +62,7 @@ export function IdentityPickerScreen({
             >
               <View style={[styles.avatar, { backgroundColor: c.bg }]}>
                 <Text style={styles.avatarText}>
-                  {u.displayName.slice(0, 1).toUpperCase()}
+                  {initialsFromDisplayName(u.displayName)}
                 </Text>
               </View>
               <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">

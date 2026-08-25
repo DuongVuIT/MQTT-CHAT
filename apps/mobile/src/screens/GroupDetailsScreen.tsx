@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
 import { ScreenHeader } from '../components/ScreenHeader';
 import {
   avatarColorFor,
@@ -173,7 +174,7 @@ export function GroupDetailsScreen({
           ]}
         >
           <Text style={styles.groupAvatarText}>
-            {(conversation.title ?? 'G').slice(0, 2).toUpperCase()}
+            {initialsFromDisplayName(conversation.title ?? 'Group')}
           </Text>
         </View>
         <Text style={styles.groupName} numberOfLines={1}>
@@ -219,7 +220,7 @@ export function GroupDetailsScreen({
                   ]}
                 >
                   <Text style={styles.avatarText}>
-                    {item.displayName.slice(0, 1).toUpperCase()}
+                    {initialsFromDisplayName(item.displayName)}
                   </Text>
                 </View>
                 <Text style={styles.name} numberOfLines={1}>
@@ -259,7 +260,7 @@ export function GroupDetailsScreen({
                 ]}
               >
                 <Text style={styles.avatarText}>
-                  {display.slice(0, 1).toUpperCase()}
+                  {initialsFromDisplayName(display)}
                 </Text>
               </View>
               <View style={styles.memberMeta}>

@@ -6,6 +6,7 @@ import { getRealtimeService } from "@/lib/realtime-service";
 import { useChatStore } from "@/store/chat-store";
 import { retryPendingMessage } from "@/components/Composer";
 import type { ChatRow } from "@/lib/message-rows";
+import { initialsFromDisplayName } from "@mqtt-chat/realtime-core";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮"] as const;
 
@@ -177,7 +178,7 @@ export const MessageBubble = memo(function MessageBubble({
             }`}
             aria-hidden={!row.startsGroup}
           >
-            {isBot ? "🤖" : message.senderName.slice(0, 1).toUpperCase()}
+            {isBot ? "🤖" : initialsFromDisplayName(message.senderName)}
           </span>
         )}
         <div className="min-w-0">

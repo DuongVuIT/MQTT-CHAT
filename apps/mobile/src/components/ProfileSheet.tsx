@@ -1,7 +1,10 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { ConnectionStatus } from '@mqtt-chat/realtime-core';
+import {
+  initialsFromDisplayName,
+  type ConnectionStatus,
+} from '@mqtt-chat/realtime-core';
 import {
   avatarColorFor,
   colors,
@@ -59,7 +62,7 @@ export function ProfileSheet({
           <View style={styles.profileRow}>
             <View style={[styles.avatar, { backgroundColor: avatar.bg }]}>
               <Text style={styles.avatarText}>
-                {displayName.slice(0, 1).toUpperCase()}
+                {initialsFromDisplayName(displayName)}
               </Text>
             </View>
             <View style={styles.profileMeta}>
