@@ -28,13 +28,15 @@ export async function handlePresenceSet(
   }
 
   if (envelope.data.isOnline) {
-    const info = await ctx.presence.addConnection(userId, deviceId);
+    const transition = await ctx.presence.addConnection(userId, deviceId);
     await ctx.db.device.upsert({
       where: { clientId: `${userId}:${deviceId}` },
       update: { lastSeenAt: new Date() },
       create: { clientId: `${userId}:${deviceId}`, userId, platform: "web" },
     });
     await ctx.presence.touchActivity(userId).catch(() => undefined);
+    if (!transition.changed) return;
+    const info = transition.info;
 
     const event = buildEventEnvelope({
       eventType: "presence.online",
@@ -60,7 +62,9 @@ export async function handlePresenceSet(
 
     ctx.log.info("presence.online", { userId, deviceId, connections: info.connectionCount });
   } else {
-    const info = await ctx.presence.removeConnection(userId, deviceId);
+    const transition = await ctx.presence.removeConnection(userId, deviceId);
+    if (!transition.changed) return;
+    const info = transition.info;
     await ctx.presence.touchActivity(userId).catch(() => undefined);
 
     const event = buildEventEnvelope({

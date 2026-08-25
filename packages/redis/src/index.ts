@@ -32,24 +32,32 @@ export interface PresenceInfo {
   lastSeenAt: string | null;
 }
 
+export interface PresenceTransition {
+  info: PresenceInfo;
+  /** True only when the device membership actually changed. */
+  changed: boolean;
+}
+
 /** Multi-device presence repository. A user is offline only when no active connection remains. */
 export class PresenceRepository {
   constructor(private readonly redis: RedisClient) {}
 
   /** Register a device connection. Returns updated presence. */
-  async addConnection(userId: string, deviceId: string): Promise<PresenceInfo> {
+  async addConnection(userId: string, deviceId: string): Promise<PresenceTransition> {
     const now = new Date().toISOString();
     const connKey = redisKeys.connection(userId, deviceId);
     await this.redis.set(connKey, now);
-    await this.redis.sadd(redisKeys.presenceUser(userId), deviceId);
-    return this.getPresence(userId);
+    const added = await this.redis.sadd(redisKeys.presenceUser(userId), deviceId);
+    return { info: await this.getPresence(userId), changed: added === 1 };
   }
 
   /** Remove a device connection. Returns updated presence. */
-  async removeConnection(userId: string, deviceId: string): Promise<PresenceInfo> {
+  async removeConnection(userId: string, deviceId: string): Promise<PresenceTransition> {
     const connKey = redisKeys.connection(userId, deviceId);
-    await this.redis.del(connKey);
-    await this.redis.srem(redisKeys.presenceUser(userId), deviceId);
+    const [connectionRemoved, membershipRemoved] = await Promise.all([
+      this.redis.del(connKey),
+      this.redis.srem(redisKeys.presenceUser(userId), deviceId),
+    ]);
     const info = await this.getPresence(userId);
     if (!info.online) {
       // Persist last-seen in a dedicated key — NEVER overwrite the presence
@@ -61,7 +69,10 @@ export class PresenceRepository {
       // Drop the empty set so the keyspace stays type-consistent.
       await this.redis.del(redisKeys.presenceUser(userId)).catch(() => undefined);
     }
-    return info;
+    return {
+      info,
+      changed: connectionRemoved === 1 || membershipRemoved === 1,
+    };
   }
 
   async getPresence(userId: string): Promise<PresenceInfo> {
