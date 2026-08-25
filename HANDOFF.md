@@ -1,50 +1,50 @@
-# HANDOFF.md — Session context (2026-08-24, session 5 — AUDIT CLOSED: READY)
+# HANDOFF.md — Session context (2026-08-25, session 7 — REGRESSION RECOVERY)
 
 > **Context only. Source code + git are the source of truth.**
-> Session 5 continued session 4's final RC audit. This file is untracked by
-> design; durable state lives in repair-log #26–#44 + PROJECT_STATUS ledger.
+> Durable state: repair-log #52–#55 + PROJECT_STATUS ledger P0-202..204,
+> P1-205. Root-cause analysis: docs/REGRESSION_ROOT_CAUSE_2026-08-25.md.
+> This file is untracked by design.
 
-## 1. What session 5 did
+## 1. What session 7 did (forensic audit → fix wave)
 
-Continued exactly from HANDOFF §11 after re-verifying every Tier-1 claim
-against source (all confirmed). Executed in order:
+Reported cluster after the phase-2/documentation round: web↔mobile data
+divergence, read/unread wrong, mobile switch-user suspicion, avatar mismatch,
+`pnpm dev` force-kill chaos. Git forensics exonerated the docs round (untracked
+files only); regression window `50243ca..5761015` (phase-2 state rewrite) with
+latent gaps the green gates never covered.
 
-| Commit    | Fix                                                                                                                                                                                                                                                                                                        |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `85615a5` | docs wave 1: repair-log #31–#37 + ledger rows for session-4 fixes; P0-044 downgraded honestly; verify:completion failed on open P0s until fixed                                                                                                                                                            |
-| `c7855e3` | **P0-184** offline flush: shared `republishPayload()` for retry+flush; queued IMAGE keeps type+storageKey; 3 unit regressions                                                                                                                                                                              |
-| `2ebc2e0` | **P0-185** deferred PUBACK: `handleMessage` option in packages/mqtt (ack after handler settles; rejection ⇒ no ack ⇒ broker redelivers); ChatWorker consumes via bridge, stop() unsubscribes first + nacks shutdown-window commands. **Live probe: 200 cmds, 2 mid-stream SIGTERMs → zero loss, zero dup** |
-| `8f5a432` | **P1-186** smoke.mjs exit gate covers every check (one `failed` flag)                                                                                                                                                                                                                                      |
-| `db64d78` | **P1-187/188/189** member-REMOVE guards: DIRECT immutable (400), last-member leave 400 (was 500 loop), sole-admin promotes oldest human in-tx; lifecycle §3c                                                                                                                                               |
-| `b6b6767` | **P1-190/189** createConversation boundaries: unknown ids 404 naming them, duplicates 400, createdBy∈memberIds required (no zero-ADMIN groups); seed conv-random aligned; lifecycle §3d                                                                                                                    |
-| `3411551` | **P1-193** root `test:mobile` wired into validate                                                                                                                                                                                                                                                          |
-| `d448938` | **P1-194** harness: SIGINT/SIGTERM run real teardown (verified live, exit 130, port freed), 120s suite watchdog, failure-path exact-ID cleanup in all fixture suites                                                                                                                                       |
-| `329c54c` | **P1-191/192** web ErrorBanner (store error was write-only) + mobile typing throttle (≥1s + auto-stop, web parity)                                                                                                                                                                                         |
-| `3334c96` | docs wave 2: repair-log #38–#44 + ledger flips to VERIFIED                                                                                                                                                                                                                                                 |
-| `702eb8e` | prettier fix for browser-e2e (real gate hole from `36741a0`, committed after that session's last validate)                                                                                                                                                                                                 |
+| Root cause | Fix |
+| ---------- | --- |
+| RC-01 gateway drain (5s) == tsx kill grace (5s) ⇒ SIGKILL/"Force killing" on every watched restart; orphaned stacks made the next `pnpm dev` die EADDRINUSE (web#dev ERROR exit 1, exit 130 — reproduced verbatim) | drain 2s + hard exit 3.5s; `pnpm dev` preflight port guard names offending PIDs (`scripts/preflight-dev.mjs`) |
+| RC-02 receipt.read fanned to everyone EXCEPT the reader ⇒ same user's other devices never converged | worker fans to ALL members; self-delivery is idempotent by design |
+| RC-03 clients blind-SET merged receipts and never self-advanced own watermark ⇒ stale badge until refetch; redelivery could regress | ONE monotonic `advanceMemberWatermark` in realtime-core; web store + MessageList self-advance; mobile pure reducer `applyReadReceipt` |
+| RC-04 mobile had NO receipt.read handler and only marked read at open time | receipt.read case + `markVisibleRead` viewing catch-up (web parity) |
+| RC-05 two avatar algorithms (web hashed display name/hash*31/tailwind vs mobile djb2/own palette/title keys) | canonical `userPresentation` in realtime-core keyed by userId/conversationId; web Avatar REQUIRES colorKey; mobile adapter parity-tested |
+| RC-06 mobile identity switch kept prior user's React state | identity-boundary effect clears every cache + timers before re-bootstrap |
+| probe:leak counted pre-existing operator/simulator clients as its own (baseline snapshot captured but never used) | filter by pre-pick baseline ids; probe ALL PASS again |
 
-## 2. Final verification (clean-state, per audit directive)
+## 2. Verification at close
 
-Everything stopped (EMQX 0 clients), restarted per README (`docker compose
-up -d && pnpm dev`), then:
+- `pnpm validate` exit 0 (format/lint/typecheck/vitest 107/mobile jest 51/build)
+- `pnpm test:e2e` exit 0 — 10 suites incl. NEW `receipt-convergence-e2e.mts`
+  (cross-device receipt delivery, REST watermark persistence, stale-receipt
+  immutability — 5/5 PASS)
+- `pnpm test:browser` exit 0 (18 PASS) · `pnpm probe:leak` ALL PASS ·
+  `pnpm probe:scroll` ALL PASS (300-msg contract)
+- LIVE cross-client: script sent as duong → simulator (Alice, General open)
+  received realtime and AUTO-marked read via the new path; REST watermark
+  advanced 309→310. Avatar colors on the simulator picker match the canonical
+  palette exactly (duong #db2777 / alice #ea580c / bob #2563eb / john #16a34a).
+- Dev runtime: gateway restart now exits ~2s inside tsx grace ("drain elapsed
+  — exiting", no force-kill); preflight refuses double-start with PIDs.
 
-- `pnpm validate` exit 0 — incl. standalone build and the newly-gated mobile jest
-- `pnpm verify:all` exit 0 — 9 isolated E2E suites + browser E2E ALL PASS (~110 checks)
-- `pnpm verify:completion` exit 0 — all P0 items VERIFIED
-- Zombie check: EMQX shows exactly 3 workers on fresh dev stack
-- Dev stack left RUNNING as before; tree clean except this file
+## 3. Remaining / notes for next session
 
-## 3. Verdict declared
-
-**READY** per the audit's acceptance criteria. Remaining leads are all
-Tier-2 (finder-claimed, never verified) — see PROJECT_STATUS §NEXT
-EXECUTABLE STEPS for the prioritized list; re-verify against source before
-fixing. Advisory externals: P1-113 (simulator taps), P1-110 (cross-client
-matrix).
-
-## 4. Notes for next agent
-
-- Branch is ~31 commits ahead of origin/main; push never requested.
-- `apps/web/next-env.d.ts` oscillates between `.next/` and `.next/dev/`
-  depending on whether build or dev ran last — artifact churn, not a bug;
-  restore with `git checkout` if it dirties the tree.
+- In-simulator TAP walkthrough is partially blocked again: Simulator window
+  clamps to 417×895 on this display, so the /tmp/simtap 1:1 calibration
+  formula (window {402,902}) no longer holds; System Events clicks DO land
+  (mapping screen=(109+0.992dx, 72+0.992dy) at position {100,44}) but focus
+  is flaky. Switch/read paths are covered by probe:leak + e2e + live test
+  instead. Re-derive a calibration tool before the next interactive pass.
+- `notion-export/` stays untracked (raw export artifacts).
+- Dev stack left RUNNING as before.

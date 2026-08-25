@@ -1044,3 +1044,60 @@ must NOT render (§9/§24). Identity cards now expose a stable
 `data-user-id` attribute; the harness prefers it (text fallback), types
 the group name by aria-label, and asserts the post-switch sidebar shows
 the display name.
+
+# 2026-08-25 — Session 7: regression recovery — dev runtime, read receipts, identity boundary, avatar parity
+
+Forensic audit after the phase-2/documentation round. Regression window
+`50243ca..5761015`; docs were exonerated (untracked only). Full analysis:
+`docs/REGRESSION_ROOT_CAUSE_2026_08_25.md` (RC-01..RC-06).
+
+# Bug #52 — gateway shutdown raced tsx watch's kill grace (P0-202)
+
+tsx watch grants a restarted child exactly 5000 ms to exit; the gateway's
+graceful drain was ALSO 5000 ms and `server.close()` waits for every proxied
+HMR/MQTT websocket — with any browser tab open the process took ~5s+ and tsx
+printed "Process didn't exit in 5s. Force killing…" / "Previous process
+hasn't exited yet…" on every watched-file restart. Teardown noise cascaded:
+an orphaned stack holding ports made the next `pnpm dev` die with web/gateway
+EADDRINUSE → turbo abort → ELIFECYCLE exit 1/exit-130 spam (reproduced
+verbatim). Fix: gateway drains 2s then hard-exits at 3.5s (always inside the
+grace); `pnpm dev` now runs scripts/preflight-dev.mjs which refuses to boot
+and prints the offending PIDs when ports are already taken.
+
+# Bug #53 — read receipts never converged across devices/clients (P0-203)
+
+Three cooperating gaps: (1) chat-worker fanned receipt.read only to OTHER
+members (`userId: { not: actor }`), so a reader's SECOND device never learned
+its own watermark advanced; (2) clients merged receipts with a blind SET —
+QoS1 redelivery/out-of-order could move lastReadSequence BACKWARDS; (3) after
+publishing a receipt neither client advanced its OWN watermark locally, so
+the derived unread badge stayed stale until refetch; mobile additionally had
+NO receipt.read handler at all and only marked read at openConversation time.
+Fix: worker fans to ALL members incl. the actor; ONE canonical monotonic
+merge `advanceMemberWatermark` in @mqtt-chat/realtime-core consumed by the
+web store AND a new pure mobile reducer; both clients self-advance on
+publish; mobile gains markVisibleRead viewing catch-up (parity with web's
+transcript effect). Permanent suite scripts/receipt-convergence-e2e.mts:
+two devices of one reader + sender — cross-device receipt delivery, REST
+watermark persistence, stale-receipt immutability.
+
+# Bug #54 — two avatar algorithms disagreed per platform (P1-205)
+
+Web hashed the DISPLAY NAME with hash*31 over tailwind classes; mobile hashed
+caller-chosen keys (peer title for DM rows, conversation id for groups,
+userId elsewhere) with signed djb2 over its own palette — same user,
+different color/initials by construction. Canonical userPresentation now
+lives in realtime-core: unsigned djb2 over the STABLE key (userId for people,
+conversationId for conversation avatars), one 600-weight hex palette with
+white foreground readable on both themes, one initials rule ("duong van" →
+DV, empty → "?"). Web Avatar REQUIRES colorKey (7 call sites updated); mobile
+avatarColorFor is a thin adapter guarded by a parity jest test.
+
+# Bug #55 — mobile identity switch leaked prior-user state (P0-204)
+
+ProfileSheet switch worked mechanically (setIdentity(null) tears the realtime
+client down per identity) but useChatSession's React state — transcripts,
+typing, presence, pagination flags, read throttles, grace timers — survived
+across identities, letting Alice's cached data bleed into Dương's first
+paint. Identity-boundary effect now clears every cache and cancels typing/
+presence timers before the fresh bootstrap lands.
