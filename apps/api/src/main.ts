@@ -11,6 +11,9 @@ const PORT = Number(process.env.PORT ?? 3001);
 async function bootstrap(): Promise<void> {
   loadServerEnv(); // fail fast on invalid env
   const app = await NestFactory.create(AppModule);
+  // Let SIGTERM/SIGINT run Nest lifecycle hooks so Prisma/Redis connections
+  // close before the process exits (dev supervisor, Docker and production).
+  app.enableShutdownHooks();
   // SINGLE PUBLIC ORIGIN: the gateway proxies /api/* here, so every route is
   // served under the canonical `/api` prefix (e.g. GET /api/health).
   // The bare root (GET /) stays unprefixed as a service-identity probe.

@@ -15,7 +15,7 @@
     ]
   },
   "scripts": {
-    "dev": "node scripts/preflight-dev.mjs && turbo run dev",
+    "dev": "exec node scripts/dev.mjs",
     "build": "turbo run build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
