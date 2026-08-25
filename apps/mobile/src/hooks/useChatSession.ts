@@ -9,6 +9,7 @@ import { COMMAND_TOPICS } from '@mqtt-chat/mqtt-contracts';
 import {
   applyConversationEvent,
   applyMessageActivity,
+  applyReadReceipt,
   applyReactionEvent,
   type ConversationEventTypeName,
 } from '../features/conversations/conversation-events';
@@ -116,6 +117,57 @@ export function useChatSession(identity: Identity | null) {
   }, [messagesByConv]);
 
   const bumpPending = useCallback(() => setPendingVersion(v => v + 1), []);
+
+  // ---- Identity boundary (REG-04) -----------------------------------------
+  // Switching identity must not inherit ANY of the previous user's cached
+  // state: transcripts, typing, presence, pagination flags, pending sends,
+  // read-throttles. The realtime client + lifecycle store are already torn
+  // down/recreated by the identity-keyed connection effect; this closes the
+  // React-state half so nothing from Alice can bleed into Dương's session.
+  const lastVisibleReadRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    setConversations([]);
+    setConversationsLoaded(false);
+    setMessagesByConv({});
+    setTypingByConv({});
+    setPresence({});
+    setHasMoreByConv({});
+    setLoadingEarlierByConv({});
+    setLoadingHistoryByConv({});
+    setError(null);
+    lastVisibleReadRef.current = new Map();
+    typingSeenRef.current.clear();
+    for (const t of presenceGraceTimersRef.current.values()) clearTimeout(t);
+    presenceGraceTimersRef.current.clear();
+    for (const t of typingStopTimersRef.current.values()) clearTimeout(t);
+    typingStopTimersRef.current.clear();
+    bumpPending();
+  }, [identity, bumpPending]);
+
+  /**
+   * REG-02: mark a conversation read up to `sequence` because the user is
+   * LOOKING AT it. Monotonic per conversation (a Map ref — no duplicate
+   * publishes for the same watermark), advances our OWN member watermark
+   * locally so the unread badge clears immediately, then best-effort
+   * publishes the canonical receipt (re-published on next view if offline).
+   */
+  const markVisibleRead = useCallback(
+    (conversationId: string, sequence: number) => {
+      if (!identity || !Number.isFinite(sequence) || sequence <= 0) return;
+      const seen = lastVisibleReadRef.current;
+      if ((seen.get(conversationId) ?? 0) >= sequence) return;
+      seen.set(conversationId, sequence);
+      setConversations(prev =>
+        applyReadReceipt(prev, {
+          conversationId,
+          userId: identity.userId,
+          lastReadSequence: sequence,
+        }),
+      );
+      clientRef.current?.markRead(conversationId, sequence).catch(() => {});
+    },
+    [identity],
+  );
 
   // ---- Incoming typing TTL sweep (§49) ------------------------------------
   useEffect(() => {
@@ -418,6 +470,27 @@ export function useChatSession(identity: Identity | null) {
           });
           break;
         }
+        case 'receipt.read': {
+          // Canonical read receipts from ANY device of ANY member (the
+          // worker fans the event to every member incl. the reader, so this
+          // user's OTHER devices converge too — REG-02). Pure reducer with
+          // the shared monotonic merge; stale/duplicates are no-ops.
+          const rid =
+            typeof data['conversationId'] === 'string'
+              ? data['conversationId']
+              : '';
+          const ruid = typeof data['userId'] === 'string' ? data['userId'] : '';
+          const rseq = Number(data['lastReadSequence']);
+          if (!rid || !ruid) break;
+          setConversations(prev =>
+            applyReadReceipt(prev, {
+              conversationId: rid,
+              userId: ruid,
+              lastReadSequence: rseq,
+            }),
+          );
+          break;
+        }
         case 'typing.started':
         case 'typing.stopped': {
           const { conversationId, userId } = data as {
@@ -525,10 +598,9 @@ export function useChatSession(identity: Identity | null) {
           [conversationId]: res.hasMore,
         }));
         const lastSeq = res.messages[res.messages.length - 1]?.sequence ?? 0;
-        if (lastSeq > 0 && identity) {
-          // Best-effort: drop silently when MQTT is down (no unhandled
-          // rejection); the next open/reconnect re-publishes the watermark.
-          clientRef.current?.markRead(conversationId, lastSeq).catch(() => {});
+        if (lastSeq > 0) {
+          // Canonical publish + optimistic self-advance via the shared path.
+          markVisibleRead(conversationId, lastSeq);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'history load failed');
@@ -541,7 +613,7 @@ export function useChatSession(identity: Identity | null) {
         }
       }
     },
-    [identity],
+    [markVisibleRead],
   );
 
   /** Load one older page (cursor = oldest loaded sequence) and PREPEND it. */
@@ -813,6 +885,7 @@ export function useChatSession(identity: Identity | null) {
       error,
       clearError,
       openConversation,
+      markVisibleRead,
       sendMessage,
       sendMediaMessage,
       editMessage,
@@ -840,6 +913,7 @@ export function useChatSession(identity: Identity | null) {
       error,
       clearError,
       openConversation,
+      markVisibleRead,
       sendMessage,
       sendMediaMessage,
       editMessage,
