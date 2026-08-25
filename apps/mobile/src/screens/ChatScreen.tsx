@@ -58,6 +58,7 @@ import {
  */
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'] as const;
+type AttachmentRequest = 'image' | 'document';
 
 /** Friendly label for the wire enum — never render FILE/VOICE raw (§11). */
 const TYPE_LABEL: Record<string, string> = {
@@ -428,6 +429,9 @@ export function ChatScreen({
   const [editing, setEditing] = useState<ApiMessage | null>(null);
   const [menuFor, setMenuFor] = useState<ApiMessage | null>(null);
   const [attachSheet, setAttachSheet] = useState(false);
+  const [pendingAttachment, setPendingAttachment] =
+    useState<AttachmentRequest | null>(null);
+  const pendingAttachmentRef = useRef<AttachmentRequest | null>(null);
   const [lightbox, setLightbox] = useState<{
     key: string;
     filename: string;
@@ -441,6 +445,39 @@ export function ChatScreen({
   useEffect(() => {
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
   }, []);
+
+  const closeAttachmentSheet = useCallback(() => {
+    pendingAttachmentRef.current = null;
+    setPendingAttachment(null);
+    setAttachSheet(false);
+  }, []);
+
+  const requestAttachment = useCallback((request: AttachmentRequest) => {
+    pendingAttachmentRef.current = request;
+    setPendingAttachment(request);
+    setAttachSheet(false);
+  }, []);
+
+  const launchPendingAttachment = useCallback(() => {
+    const request = pendingAttachmentRef.current;
+    if (!request) return;
+
+    // Consume before presenting: some native modal implementations can emit
+    // more than one dismissal signal during renderer transitions.
+    pendingAttachmentRef.current = null;
+    setPendingAttachment(null);
+    if (request === 'image') actions.pickImage();
+    else actions.pickDocument();
+  }, [actions]);
+
+  useEffect(() => {
+    // React Native only guarantees Modal.onDismiss on iOS. On Android this
+    // effect runs after the `visible=false` commit has removed the host view,
+    // so the native picker is never presented on top of a dismissing modal.
+    if (Platform.OS !== 'ios' && !attachSheet && pendingAttachment !== null) {
+      launchPendingAttachment();
+    }
+  }, [attachSheet, launchPendingAttachment, pendingAttachment]);
 
   // ---- Canonical scroll model (inverted list) ----------------------------
   // Offset 0 is the newest message. Appends at offset 0 stay visible with NO
@@ -790,15 +827,14 @@ export function ChatScreen({
 
       {/* Attachment chooser (§18) — explicit menu, slide-up sheet */}
       <Modal
+        testID="attachment-sheet"
         visible={attachSheet}
         transparent
         animationType="slide"
-        onRequestClose={() => setAttachSheet(false)}
+        onRequestClose={closeAttachmentSheet}
+        onDismiss={launchPendingAttachment}
       >
-        <Pressable
-          style={styles.sheetBackdrop}
-          onPress={() => setAttachSheet(false)}
-        >
+        <Pressable style={styles.sheetBackdrop} onPress={closeAttachmentSheet}>
           <Pressable
             style={[
               styles.sheet,
@@ -813,10 +849,7 @@ export function ChatScreen({
                 styles.sheetOption,
                 pressed && styles.sheetOptionPressed,
               ]}
-              onPress={() => {
-                setAttachSheet(false);
-                actions.pickImage();
-              }}
+              onPress={() => requestAttachment('image')}
               accessibilityRole="button"
               accessibilityLabel="Choose photo"
             >
@@ -838,10 +871,7 @@ export function ChatScreen({
                 styles.sheetOption,
                 pressed && styles.sheetOptionPressed,
               ]}
-              onPress={() => {
-                setAttachSheet(false);
-                actions.pickDocument();
-              }}
+              onPress={() => requestAttachment('document')}
               accessibilityRole="button"
               accessibilityLabel="Choose document"
             >
@@ -863,7 +893,7 @@ export function ChatScreen({
                 styles.sheetCancel,
                 pressed && styles.sheetOptionPressed,
               ]}
-              onPress={() => setAttachSheet(false)}
+              onPress={closeAttachmentSheet}
               accessibilityRole="button"
               accessibilityLabel="Cancel attach"
             >
