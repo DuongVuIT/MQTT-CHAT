@@ -74,7 +74,7 @@ export default function UserPickerPage() {
                   }}
                   className="flex w-full items-center gap-3 rounded-xl border border-line px-4 py-3 text-left transition-colors duration-fast hover:border-brand-strong hover:bg-raised"
                 >
-                  <Avatar name={user.displayName} size="md" />
+                  <Avatar name={user.displayName} colorKey={user.id} size="md" />
                   <span className="min-w-0">
                     <span className="block truncate font-medium">{user.displayName}</span>
                   </span>

@@ -169,6 +169,7 @@ export function DetailsPanel({
         <div className="flex flex-col items-center pb-4 text-center">
           <Avatar
             name={conversation.type === "GROUP" ? (conversation.title ?? "Group") : "Direct"}
+            colorKey={conversation.id}
             size="lg"
           />
           <p className="mt-2 max-w-full truncate text-sm font-semibold">
@@ -235,7 +236,7 @@ export function DetailsPanel({
                     }}
                     className="flex w-full items-center gap-2 truncate rounded-md px-1.5 py-1 text-left text-sm transition-colors duration-fast hover:bg-raised disabled:opacity-50"
                   >
-                    <Avatar name={u.displayName} size="sm" />
+                    <Avatar name={u.displayName} colorKey={u.id} size="sm" />
                     <span className="truncate">{u.displayName}</span>
                   </button>
                 </li>
@@ -261,6 +262,7 @@ export function DetailsPanel({
                     member's color matches everywhere. */}
                 <Avatar
                   name={user?.displayName ?? m.userId}
+                  colorKey={m.userId}
                   size="sm"
                   online={presence[m.userId]}
                 />

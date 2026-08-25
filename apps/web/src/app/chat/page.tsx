@@ -151,6 +151,9 @@ export default function ChatPage() {
     activeConversation?.type === "GROUP"
       ? (activeConversation.title ?? "Group")
       : activeTitle || "?";
+  // Canonical avatar color key: conversation id (group or DM alike) — never a
+  // display name (REG-05 parity with mobile).
+  const headerAvatarKey = activeConversation?.id ?? "?";
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-app">
@@ -189,7 +192,7 @@ export default function ChatPage() {
                 >
                   ☰
                 </button>
-                <Avatar name={headerAvatarName} size="sm" />
+                <Avatar name={headerAvatarName} colorKey={headerAvatarKey} size="sm" />
                 <div className="min-w-0">
                   <h2 className="truncate text-sm font-semibold">{activeTitle}</h2>
                   <p className="truncate text-xs text-ink-3">{activeSubtitle}</p>

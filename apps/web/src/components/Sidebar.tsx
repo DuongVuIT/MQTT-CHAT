@@ -120,7 +120,11 @@ export function Sidebar() {
       {/* Profile header (§27) — display name, not engineering ids. */}
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          <Avatar name={identityUser?.displayName ?? identity?.userId ?? "?"} size="sm" />
+          <Avatar
+            name={identityUser?.displayName ?? identity?.userId ?? "?"}
+            colorKey={identity?.userId ?? "?"}
+            size="sm"
+          />
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">
               {identityUser?.displayName ?? identity?.userId}
@@ -280,7 +284,12 @@ export function Sidebar() {
                   isActive ? "bg-brand-soft" : "hover:bg-raised"
                 }`}
               >
-                <Avatar name={title} size="md" online={isGroup ? undefined : online} />
+                <Avatar
+                  name={title}
+                  colorKey={c.id}
+                  size="md"
+                  online={isGroup ? undefined : online}
+                />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span

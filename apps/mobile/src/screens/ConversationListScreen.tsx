@@ -50,9 +50,10 @@ const Row = React.memo(function Row({
   identityUserId: string | null;
   onPress: (id: string) => void;
 }): React.JSX.Element {
-  const avatar = avatarColorFor(
-    conversation.type === 'GROUP' ? conversation.id : title,
-  );
+  // Canonical color key = the stable conversation id for BOTH group and DM
+  // rows (REG-05): hashing the peer's display title made the same user wear
+  // different colors on web vs mobile and drift when a display name changes.
+  const avatar = avatarColorFor(conversation.id);
   const isGroup = conversation.type === 'GROUP';
   // Unread = canonical lastSequence minus MY read watermark (§8) — never a
   // local-only counter.

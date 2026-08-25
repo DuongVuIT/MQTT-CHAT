@@ -9,6 +9,8 @@
  * elevation/z-index → avatar identity palette.
  */
 
+import { avatarColorHex } from '@mqtt-chat/realtime-core';
+
 // ---------------------------------------------------------------------------
 // Color
 // ---------------------------------------------------------------------------
@@ -134,29 +136,19 @@ export const zIndex = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Avatar identity palette — deterministic per user id, shared concept with
-// the web Avatar (packages/ui): muted, accessible hue pairs on dark.
+// Avatar identity palette — DELEGATED to the canonical presentation helper in
+// @mqtt-chat/realtime-core. Web and mobile MUST hash the same key with the
+// same algorithm over the same palette, or the same user renders different
+// colors per platform (REG-05). Keys: userId for people, conversationId for
+// conversation avatars — never display names.
 // ---------------------------------------------------------------------------
 
-const AVATAR_PAIRS = [
-  { bg: '#3B4E8C', fg: '#DCE4FF' },
-  { bg: '#7C4A8C', fg: '#F4DFFF' },
-  { bg: '#1F6E5C', fg: '#C9F7E8' },
-  { bg: '#8C5A2B', fg: '#FFE9CC' },
-  { bg: '#8C3B52', fg: '#FFDCE5' },
-  { bg: '#2F6C8C', fg: '#D3EEFF' },
-  { bg: '#5B5EA6', fg: '#E3E5FF' },
-  { bg: '#4E7A3A', fg: '#E2F7D5' },
-] as const;
+/** White text on every 600-weight palette entry stays readable on both platforms. */
+const AVATAR_FG = '#FFFFFF';
 
-/** Stable hash (djb2) → avatar pair. Same id ⇒ same color, both platforms. */
+/** Stable identity → avatar colors. Thin adapter over the shared algorithm. */
 export function avatarColorFor(id: string): { bg: string; fg: string } {
-  let hash = 5381;
-  for (let i = 0; i < id.length; i += 1) {
-    hash = ((hash << 5) + hash + id.charCodeAt(i)) | 0;
-  }
-  const idx = Math.abs(hash) % AVATAR_PAIRS.length;
-  return AVATAR_PAIRS[idx];
+  return { bg: avatarColorHex(id), fg: AVATAR_FG };
 }
 
 // ---------------------------------------------------------------------------

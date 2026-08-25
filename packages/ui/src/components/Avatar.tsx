@@ -1,7 +1,16 @@
 import { cn } from "../cn";
+import { initialsFromDisplayName, avatarColorHex } from "@mqtt-chat/realtime-core";
 
 export interface AvatarProps {
+  /** Initials source — display name (never affects the color). */
   name: string;
+  /**
+   * Stable identity the color derives from: userId for people, conversationId
+   * for groups. REQUIRED so web and mobile always render the same color for
+   * the same identity (REG-05 — web used to hash the display name with a
+   * different algorithm/palette than mobile).
+   */
+  colorKey: string;
   size?: "sm" | "md" | "lg";
   online?: boolean;
   className?: string;
@@ -13,39 +22,19 @@ const sizeClasses = {
   lg: "h-14 w-14 text-lg",
 } as const;
 
-const palette = [
-  "bg-blue-500",
-  "bg-emerald-500",
-  "bg-violet-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-cyan-500",
-];
-
-function colorFor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  }
-  const fallback = "bg-blue-500";
-  return palette[hash % palette.length] ?? fallback;
-}
-
-export function Avatar({ name, size = "md", online, className }: AvatarProps) {
-  const initials = name
-    .split(/\s+/)
-    .map((part) => part.charAt(0).toUpperCase())
-    .slice(0, 2)
-    .join("");
+export function Avatar({ name, colorKey, size = "md", online, className }: AvatarProps) {
+  // Shared canonical presentation — same hash + palette as mobile.
+  const background = avatarColorHex(colorKey);
+  const initials = initialsFromDisplayName(name);
 
   return (
     <span className={cn("relative inline-flex shrink-0", className)}>
       <span
         aria-hidden="true"
+        style={{ backgroundColor: background }}
         className={cn(
           "inline-flex items-center justify-center rounded-full font-semibold text-white select-none",
           sizeClasses[size],
-          colorFor(name),
         )}
       >
         {initials}

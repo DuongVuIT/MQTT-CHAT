@@ -551,6 +551,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@mqtt-chat/realtime-core':
+        specifier: workspace:*
+        version: link:../realtime-core
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
