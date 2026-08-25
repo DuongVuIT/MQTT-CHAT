@@ -48,6 +48,7 @@ export class RealtimeService {
   private handlers = new Set<EventHandler>();
   private stateHandlers = new Set<(state: ConnectionState) => void>();
   private identity: Identity | null = null;
+  private disconnectPromise: Promise<void> | null = null;
   /** Global topics requested via subscribeGlobal — restored on reconnect by core extras. */
   private globalTopics: string[] = [];
 
@@ -185,19 +186,34 @@ export class RealtimeService {
 
   /** Full teardown — graceful offline announce, socket closed, state cleared. */
   async disconnect(): Promise<void> {
+    // Route cleanup and a simultaneous new-identity connect can both request
+    // teardown. Share one operation so presence=false is published exactly
+    // once and both callers wait for the same socket close.
+    if (this.disconnectPromise) {
+      await this.disconnectPromise;
+      return;
+    }
     const core = this.core;
     if (!core) return;
-    if (core.status === "connected" && this.identity) {
-      await core.setPresence(false).catch(() => {});
-    }
-    await core.disconnect();
-    // A newer connect may have installed another core while this async
-    // teardown awaited its presence publish/socket close. Never let the stale
-    // teardown null or emit state for the new identity's live session.
-    if (this.core === core) {
-      this.core = null;
-      this.identity = null;
-      this.emitState("disconnected");
+    const operation = (async () => {
+      if (core.status === "connected" && this.identity) {
+        await core.setPresence(false).catch(() => {});
+      }
+      await core.disconnect();
+      // A newer connect may have installed another core while this async
+      // teardown awaited its presence publish/socket close. Never let the stale
+      // teardown null or emit state for the new identity's live session.
+      if (this.core === core) {
+        this.core = null;
+        this.identity = null;
+        this.emitState("disconnected");
+      }
+    })();
+    this.disconnectPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.disconnectPromise === operation) this.disconnectPromise = null;
     }
   }
 
