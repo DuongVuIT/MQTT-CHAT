@@ -1,0 +1,2413 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MQTT Chat — Tổng quan hệ thống</title>
+    <style>
+      :root {
+        --ink: #172033;
+        --muted: #526078;
+        --line: #dce3ef;
+        --blue: #2563eb;
+        --cyan: #0891b2;
+        --paper: #fff;
+        --bg: #eef3f9;
+        --nav: #0f172a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+        scroll-snap-type: y mandatory;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--bg);
+        font:
+          15px/1.44 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      a:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid #22d3ee;
+        outline-offset: 3px;
+      }
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: 286px;
+        padding: 28px 18px;
+        overflow: auto;
+        color: #e2e8f0;
+        background: var(--nav);
+      }
+      .brand {
+        padding: 0 10px 20px;
+        border-bottom: 1px solid #334155;
+      }
+      .brand small {
+        color: #67e8f9;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+      }
+      .brand h1 {
+        margin: 7px 0 5px;
+        color: #fff;
+        font-size: 22px;
+      }
+      .brand p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 13px;
+      }
+      nav {
+        margin-top: 16px;
+      }
+      nav a {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 7px;
+        padding: 9px 10px;
+        border-radius: 8px;
+        color: #cbd5e1;
+        text-decoration: none;
+        font-size: 13px;
+        line-height: 1.3;
+      }
+      nav a span {
+        color: #67e8f9;
+        font-weight: 800;
+      }
+      nav a:hover,
+      nav a.active {
+        color: #fff;
+        background: #1e293b;
+      }
+      main {
+        margin-left: 286px;
+        padding: 16px;
+      }
+      .mobile-nav {
+        display: none;
+      }
+      .slide {
+        position: relative;
+        max-width: 1180px;
+        min-height: calc(100vh - 32px);
+        margin: 0 auto 16px;
+        padding: clamp(30px, 4vw, 48px);
+        overflow: hidden;
+        scroll-margin-top: 16px;
+        scroll-snap-align: start;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--paper);
+        box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+      }
+      .slide::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 7px;
+        background: linear-gradient(90deg, var(--blue), var(--cyan));
+      }
+      .chapter-no {
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      h2 {
+        max-width: 980px;
+        margin: 7px 0 17px;
+        font-size: clamp(31px, 3.5vw, 46px);
+        line-height: 1.06;
+        letter-spacing: -0.035em;
+      }
+      p {
+        max-width: 86ch;
+        margin: 9px 0;
+      }
+      ul,
+      ol {
+        max-width: 86ch;
+        margin: 9px 0;
+        padding-left: 24px;
+      }
+      li {
+        margin: 4px 0;
+      }
+      p,
+      li,
+      td,
+      th {
+        overflow-wrap: anywhere;
+      }
+      pre {
+        max-width: 930px;
+        margin: 11px 0;
+        padding: 14px 18px;
+        overflow: auto;
+        border-radius: 12px;
+        background: #111827;
+        color: #e5efff;
+        font:
+          12.5px/1.38 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      .table-wrap {
+        max-width: 100%;
+        margin: 11px 0;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      table {
+        width: 100%;
+        min-width: 570px;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      th,
+      td {
+        padding: 6px 9px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #eff6ff;
+        font-weight: 800;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .source {
+        margin-top: 11px;
+        color: #64748b;
+        font-size: 11px;
+      }
+      .slide-content {
+        padding-bottom: 26px;
+      }
+      .slide-footer {
+        position: absolute;
+        inset: auto clamp(30px, 4vw, 48px) 18px;
+        display: flex;
+        justify-content: space-between;
+        color: #7c879b;
+        font-size: 12px;
+      }
+      .keyboard {
+        position: fixed;
+        right: 20px;
+        bottom: 18px;
+        z-index: 20;
+        padding: 7px 11px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--muted);
+        font-size: 12px;
+        box-shadow: 0 5px 18px rgba(15, 23, 42, 0.1);
+      }
+      @media (max-width: 900px) {
+        html {
+          scroll-padding-top: 58px;
+          scroll-snap-type: none;
+        }
+        .sidebar {
+          display: none;
+        }
+        main {
+          margin: 0;
+          padding: 12px;
+        }
+        .mobile-nav {
+          display: block;
+          position: sticky;
+          top: 0;
+          z-index: 30;
+          margin: -12px -12px 12px;
+          color: #fff;
+          background: var(--nav);
+        }
+        .mobile-nav summary {
+          padding: 14px 18px;
+          cursor: pointer;
+          font-weight: 800;
+          list-style: none;
+        }
+        .mobile-nav nav {
+          max-height: 65vh;
+          margin: 0;
+          padding: 0 10px 12px;
+          overflow: auto;
+        }
+        .slide {
+          min-height: auto;
+          padding: 34px 24px 64px;
+          scroll-margin-top: 58px;
+          border-radius: 13px;
+        }
+        h2 {
+          font-size: 35px;
+        }
+        .slide-footer {
+          inset: auto 24px 19px;
+        }
+        .keyboard {
+          display: none;
+        }
+      }
+      @media (max-width: 520px) {
+        .slide {
+          padding: 29px 18px 62px;
+        }
+        h2 {
+          font-size: 30px;
+        }
+        pre {
+          margin-left: -4px;
+          margin-right: -4px;
+          padding: 14px;
+          font-size: 12px;
+        }
+        table {
+          min-width: 530px;
+        }
+        .slide-footer {
+          inset: auto 18px 17px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+      }
+      @media print {
+        @page {
+          size: A4 landscape;
+          margin: 8mm;
+        }
+        body {
+          background: #fff;
+          font-size: 10.5pt;
+        }
+        .sidebar,
+        .mobile-nav,
+        .keyboard {
+          display: none !important;
+        }
+        main {
+          margin: 0;
+          padding: 0;
+        }
+        .slide {
+          width: 100%;
+          min-height: 180mm;
+          margin: 0;
+          padding: 14mm;
+          border: 0;
+          border-radius: 0;
+          box-shadow: none;
+          break-after: page;
+        }
+        .slide-footer {
+          inset: auto 14mm 7mm;
+        }
+        pre,
+        .table-wrap {
+          break-inside: avoid;
+        }
+      }
+
+      code:not(pre code) {
+        padding: 0.08em 0.32em;
+        border-radius: 4px;
+        background: #eef2ff;
+        color: #3730a3;
+        font:
+          0.92em ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <small>TỔNG QUAN HỆ THỐNG</small>
+        <h1>MQTT Chat</h1>
+        <p>11 chương · 45 màn trình chiếu</p>
+      </div>
+      <nav>
+        <a href="#chapter-1"><span>01</span>Bắt đầu từ đâu và hệ thống giải quyết việc gì?</a>
+        <a href="#chapter-2"><span>02</span>Hệ thống sử dụng công nghệ nào và để làm gì?</a>
+        <a href="#chapter-3"><span>03</span>Các khái niệm cần biết trước khi đọc kiến trúc</a>
+        <a href="#chapter-4"><span>04</span>Kiến trúc tổng thể</a>
+        <a href="#chapter-5"><span>05</span>Mã nguồn được chia như thế nào?</a>
+        <a href="#chapter-6"><span>06</span>Luồng gửi tin nhắn từ đầu đến cuối</a>
+        <a href="#chapter-7"><span>07</span>Dữ liệu được lưu ở đâu?</a>
+        <a href="#chapter-8"><span>08</span>Các chức năng chính hoạt động như thế nào?</a>
+        <a href="#chapter-9"><span>09</span>Web và Mobile giữ dữ liệu trên màn hình ra sao?</a>
+        <a href="#chapter-10"
+          ><span>10</span>Hệ thống tránh mất, trùng và sai thứ tự như thế nào?</a
+        >
+        <a href="#chapter-11"><span>11</span>Tổng kết và cách lần theo một tính năng</a>
+      </nav>
+    </aside>
+    <main>
+      <details class="mobile-nav">
+        <summary>Mục lục — 11 chương</summary>
+        <nav>
+          <a href="#chapter-1"><span>01</span>Bắt đầu từ đâu và hệ thống giải quyết việc gì?</a>
+          <a href="#chapter-2"><span>02</span>Hệ thống sử dụng công nghệ nào và để làm gì?</a>
+          <a href="#chapter-3"><span>03</span>Các khái niệm cần biết trước khi đọc kiến trúc</a>
+          <a href="#chapter-4"><span>04</span>Kiến trúc tổng thể</a>
+          <a href="#chapter-5"><span>05</span>Mã nguồn được chia như thế nào?</a>
+          <a href="#chapter-6"><span>06</span>Luồng gửi tin nhắn từ đầu đến cuối</a>
+          <a href="#chapter-7"><span>07</span>Dữ liệu được lưu ở đâu?</a>
+          <a href="#chapter-8"><span>08</span>Các chức năng chính hoạt động như thế nào?</a>
+          <a href="#chapter-9"><span>09</span>Web và Mobile giữ dữ liệu trên màn hình ra sao?</a>
+          <a href="#chapter-10"
+            ><span>10</span>Hệ thống tránh mất, trùng và sai thứ tự như thế nào?</a
+          >
+          <a href="#chapter-11"><span>11</span>Tổng kết và cách lần theo một tính năng</a>
+        </nav>
+      </details>
+      <section class="slide" id="chapter-1" data-chapter="1">
+        <div class="chapter-no">CHƯƠNG 01 · Bắt đầu từ đâu và hệ thống giải quyết việc gì?</div>
+        <h2>Năm chương đầu giúp hiểu hệ thống và nơi đặt mã nguồn</h2>
+        <div class="slide-content">
+          <p>Phần đầu trả lời các câu hỏi cần biết trước khi đọc sâu vào luồng xử lý.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Chương</th>
+                  <th>Câu hỏi được trả lời</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>1. Bắt đầu từ đâu?</td>
+                  <td>Hệ thống có những phần nào và nguyên tắc quan trọng nhất là gì?</td>
+                </tr>
+                <tr>
+                  <td>2. Công nghệ</td>
+                  <td>Mỗi công nghệ được dùng ở đâu và giải quyết việc gì?</td>
+                </tr>
+                <tr>
+                  <td>3. Khái niệm nền tảng</td>
+                  <td>MQTT, EMQX, yêu cầu, sự kiện và Outbox là gì?</td>
+                </tr>
+                <tr>
+                  <td>4. Kiến trúc tổng thể</td>
+                  <td>
+                    Web, Mobile, Gateway, API và các chương trình xử lý kết nối với nhau ra sao?
+                  </td>
+                </tr>
+                <tr>
+                  <td>5. Cấu trúc mã nguồn</td>
+                  <td>Cần mở thư mục nào khi muốn tìm một chức năng?</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Sau chương 5, người đọc đã có đủ bản đồ tổng thể để theo dõi một tin nhắn đi qua hệ
+            thống mà không phải đoán vai trò của từng thành phần.
+          </p>
+        </div>
+        <div class="slide-footer"><span>1.1</span><strong>01 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-1-2" data-chapter="1">
+        <div class="chapter-no">CHƯƠNG 01 · Bắt đầu từ đâu và hệ thống giải quyết việc gì?</div>
+        <h2>Sáu chương sau đi vào xử lý dữ liệu và cách kiểm tra lỗi</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Chương</th>
+                  <th>Câu hỏi được trả lời</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>6. Luồng gửi tin nhắn</td>
+                  <td>Từ lúc bấm Gửi đến khi các thiết bị nhận kết quả có những bước nào?</td>
+                </tr>
+                <tr>
+                  <td>7. Nơi lưu dữ liệu</td>
+                  <td>PostgreSQL, Redis và MinIO lưu phần dữ liệu nào?</td>
+                </tr>
+                <tr>
+                  <td>8. Các chức năng chính</td>
+                  <td>
+                    Nhóm chat, trả lời, cảm xúc, trạng thái trực tuyến, tệp và bot hoạt động thế
+                    nào?
+                  </td>
+                </tr>
+                <tr>
+                  <td>9. Dữ liệu trên Web và Mobile</td>
+                  <td>Ứng dụng giữ tin đang gửi và đồng bộ lại sau khi mất mạng ra sao?</td>
+                </tr>
+                <tr>
+                  <td>10. Độ tin cậy</td>
+                  <td>Hệ thống chống trùng, giữ đúng thứ tự và tránh mất sự kiện thế nào?</td>
+                </tr>
+                <tr>
+                  <td>11. Tổng kết</td>
+                  <td>Khi có lỗi, nên kiểm tra dữ liệu theo thứ tự nào?</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Tài liệu đi theo đúng đường đi của dữ liệu: thao tác trên giao diện → phía máy chủ xử lý
+            → nơi lưu dữ liệu → sự kiện trả về ứng dụng.
+          </p>
+        </div>
+        <div class="slide-footer"><span>1.2</span><strong>02 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-1-3" data-chapter="1">
+        <div class="chapter-no">CHƯƠNG 01 · Bắt đầu từ đâu và hệ thống giải quyết việc gì?</div>
+        <h2>Phạm vi của MQTT Chat</h2>
+        <div class="slide-content">
+          <p>
+            MQTT Chat là một kho mã nguồn chung viết bằng TypeScript, gồm ứng dụng Web, ứng dụng
+            Mobile và các chương trình chạy phía máy chủ. Hệ thống hỗ trợ chat riêng, chat nhóm, trả
+            lời tin nhắn, thả cảm xúc, gửi ảnh và tệp, trạng thái trực tuyến, trạng thái đang nhập,
+            trạng thái đã nhận/đã đọc, bot tự động, thông báo và trang quản trị.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thành phần</th>
+                  <th>Trách nhiệm chính</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Web</td>
+                  <td>Giao diện chat trên trình duyệt và trang quản trị</td>
+                </tr>
+                <tr>
+                  <td>Mobile</td>
+                  <td>Ứng dụng iOS và Android</td>
+                </tr>
+                <tr>
+                  <td>Gateway</td>
+                  <td>Địa chỉ chung để Web và Mobile truy cập giao diện, API, tệp và MQTT</td>
+                </tr>
+                <tr>
+                  <td>API</td>
+                  <td>Cung cấp dữ liệu qua HTTP, xử lý nhóm chat, lịch sử và tệp</td>
+                </tr>
+                <tr>
+                  <td>Các chương trình xử lý</td>
+                  <td>Xử lý tin nhắn, bot và thông báo ở phía máy chủ</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Web và Mobile cần phản hồi nhanh, nhưng kết quả cuối cùng phải do phía máy chủ kiểm tra
+            và xác nhận. Nhờ vậy các thiết bị cùng nhận một dữ liệu thống nhất.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web · apps/mobile · apps/gateway · apps/api · apps/*-worker
+          </p>
+        </div>
+        <div class="slide-footer"><span>1.3</span><strong>03 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-1-4" data-chapter="1">
+        <div class="chapter-no">CHƯƠNG 01 · Bắt đầu từ đâu và hệ thống giải quyết việc gì?</div>
+        <h2>Phía máy chủ quyết định dữ liệu chính thức</h2>
+        <div class="slide-content">
+          <p>
+            Khi người dùng gửi tin nhắn, ứng dụng tạo một bản ghi đang chờ trên thiết bị. Bản ghi
+            này có <code>clientMessageId</code> để nhận diện lần gửi, nhưng chưa có mã tin nhắn và
+            số thứ tự do máy chủ cấp.
+          </p>
+          <p>
+            Ứng dụng gửi yêu cầu <code>message.send</code>. <code>chat-worker</code> kiểm tra cấu
+            trúc dữ liệu, quyền tham gia cuộc trò chuyện và tin nhắn được trả lời. Nếu hợp lệ,
+            chương trình này lưu <code>Message</code> cùng <code>OutboxEvent</code> trong một giao
+            dịch của PostgreSQL.
+          </p>
+          <p>
+            Sau khi lưu thành công, phía máy chủ phát <code>message.created</code>. Đây là sự kiện
+            chính thức: nó cho biết tin nhắn đã tồn tại trong cơ sở dữ liệu, có mã do máy chủ cấp và
+            đã được xếp thứ tự.
+          </p>
+          <pre><code>Người dùng bấm Gửi
+→ ứng dụng tạo bản ghi đang chờ
+→ gửi yêu cầu message.send
+→ chat-worker kiểm tra và lưu dữ liệu
+→ phía máy chủ phát sự kiện message.created
+→ Web và Mobile cập nhật bằng dữ liệu chính thức</code></pre>
+          <p class="source">
+            Mã nguồn liên quan: apps/web/src/components/Composer.tsx ·
+            apps/chat-worker/src/handlers/messages.ts · packages/database/prisma/schema.prisma
+          </p>
+        </div>
+        <div class="slide-footer"><span>1.4</span><strong>04 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-2" data-chapter="2">
+        <div class="chapter-no">CHƯƠNG 02 · Hệ thống sử dụng công nghệ nào và để làm gì?</div>
+        <h2>Công nghệ nền tảng để viết và quản lý mã nguồn</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Công nghệ</th>
+                  <th>Là gì?</th>
+                  <th>Dùng để làm gì trong dự án?</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>TypeScript</td>
+                  <td>Ngôn ngữ có hệ thống kiểm tra kiểu dữ liệu</td>
+                  <td>
+                    Báo lỗi khi các phần của hệ thống truyền sai kiểu dữ liệu trước khi chương trình
+                    chạy
+                  </td>
+                </tr>
+                <tr>
+                  <td>Node.js 22+</td>
+                  <td>Môi trường chạy chương trình phía máy chủ</td>
+                  <td>Chạy Gateway, API, các chương trình xử lý và các tập lệnh hỗ trợ</td>
+                </tr>
+                <tr>
+                  <td>pnpm</td>
+                  <td>Công cụ cài thư viện và quản lý nhiều dự án con</td>
+                  <td>Liên kết các ứng dụng với thư viện dùng chung trong cùng kho mã nguồn</td>
+                </tr>
+                <tr>
+                  <td>Turborepo</td>
+                  <td>Công cụ điều phối công việc trong kho mã nguồn</td>
+                  <td>Chạy build, kiểm tra kiểu và các lệnh khác theo đúng thứ tự phụ thuộc</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            TypeScript kiểm tra mã nguồn trước khi chạy, nhưng không tự kiểm tra được dữ liệu từ
+            HTTP, MQTT hoặc biến môi trường. Các dữ liệu đi từ bên ngoài vào vẫn được kiểm tra lúc
+            chương trình chạy bằng Zod.
+          </p>
+          <p>
+            pnpm quản lý thư viện; Turborepo quản lý các lệnh cần chạy. Hai công cụ phục vụ hai mục
+            đích khác nhau.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: package.json · pnpm-workspace.yaml · turbo.json · tooling/typescript
+          </p>
+        </div>
+        <div class="slide-footer"><span>2.1</span><strong>05 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-2-2" data-chapter="2">
+        <div class="chapter-no">CHƯƠNG 02 · Hệ thống sử dụng công nghệ nào và để làm gì?</div>
+        <h2>Công nghệ của ứng dụng Web</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Công nghệ</th>
+                  <th>Vai trò trong Web</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Next.js</td>
+                  <td>
+                    Tổ chức các trang <code>/</code>, <code>/chat</code>, <code>/admin</code> và tạo
+                    bản Web để đưa vào sử dụng
+                  </td>
+                </tr>
+                <tr>
+                  <td>React</td>
+                  <td>
+                    Chia giao diện thành các thành phần và cập nhật màn hình khi dữ liệu thay đổi
+                  </td>
+                </tr>
+                <tr>
+                  <td>Zustand</td>
+                  <td>
+                    Giữ danh sách cuộc trò chuyện, tin nhắn, tin đang chờ và trạng thái trực tuyến
+                    trên trình duyệt
+                  </td>
+                </tr>
+                <tr>
+                  <td>Tailwind CSS</td>
+                  <td>
+                    Viết kiểu hiển thị, bố cục và cách giao diện thay đổi theo kích thước màn hình
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            React chịu trách nhiệm hiển thị. Zustand giữ bản dữ liệu mà Web đang dùng. Next.js tổ
+            chức ứng dụng Web. Ba phần này không quyết định tin nhắn nào được công nhận; quyết định
+            đó vẫn thuộc phía máy chủ.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web/package.json · apps/web/src/app ·
+            apps/web/src/store/chat-store.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>2.2</span><strong>06 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-2-3" data-chapter="2">
+        <div class="chapter-no">CHƯƠNG 02 · Hệ thống sử dụng công nghệ nào và để làm gì?</div>
+        <h2>Công nghệ của ứng dụng Mobile</h2>
+        <div class="slide-content">
+          <p>Ứng dụng Mobile dùng React Native và có phần dự án riêng cho iOS và Android.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Công nghệ</th>
+                  <th>Vai trò trong Mobile</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>React Native</td>
+                  <td>Viết phần lớn giao diện và xử lý dùng chung cho iOS/Android</td>
+                </tr>
+                <tr>
+                  <td>Hermes</td>
+                  <td>Chạy mã JavaScript của ứng dụng trên điện thoại</td>
+                </tr>
+                <tr>
+                  <td>Metro</td>
+                  <td>Gom mã nguồn và thư viện thành gói mà ứng dụng Mobile có thể chạy</td>
+                </tr>
+                <tr>
+                  <td>Gradle</td>
+                  <td>Biên dịch và đóng gói ứng dụng Android</td>
+                </tr>
+                <tr>
+                  <td>Xcode/CocoaPods</td>
+                  <td>Biên dịch ứng dụng và quản lý thư viện cho iOS</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Khi người dùng chọn ảnh hoặc tài liệu, React Native gọi bộ chọn tệp của hệ điều hành.
+            Phần xử lý chat nhận tệp, tải nội dung lên API rồi gửi thông tin mô tả qua MQTT.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/mobile/package.json · apps/mobile/android · apps/mobile/ios ·
+            apps/mobile/metro.config.js
+          </p>
+        </div>
+        <div class="slide-footer"><span>2.3</span><strong>07 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-2-4" data-chapter="2">
+        <div class="chapter-no">CHƯƠNG 02 · Hệ thống sử dụng công nghệ nào và để làm gì?</div>
+        <h2>Công nghệ của API và lớp truy cập dữ liệu</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Công nghệ</th>
+                  <th>Vai trò</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>NestJS</td>
+                  <td>Tổ chức các đường dẫn API, tách phần nhận yêu cầu và phần xử lý nghiệp vụ</td>
+                </tr>
+                <tr>
+                  <td>Zod</td>
+                  <td>
+                    Kiểm tra dữ liệu nhận từ HTTP, MQTT, biến môi trường và cấu hình bot khi chương
+                    trình đang chạy
+                  </td>
+                </tr>
+                <tr>
+                  <td>Prisma</td>
+                  <td>
+                    Đọc, ghi PostgreSQL bằng TypeScript và quản lý thay đổi cấu trúc cơ sở dữ liệu
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            NestJS chủ yếu được dùng trong <code>apps/api</code>. Các chương trình xử lý là những
+            tiến trình Node.js riêng, không chạy bên trong API.
+          </p>
+          <p>
+            Zod trả lời câu hỏi “dữ liệu vừa nhận có đúng cấu trúc không?”. Prisma trả lời câu hỏi
+            “cần đọc hoặc ghi bảng nào trong PostgreSQL?”. Hai công cụ không thay thế nhau.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/api · packages/database · packages/mqtt-contracts ·
+            packages/config
+          </p>
+        </div>
+        <div class="slide-footer"><span>2.4</span><strong>08 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-2-5" data-chapter="2">
+        <div class="chapter-no">CHƯƠNG 02 · Hệ thống sử dụng công nghệ nào và để làm gì?</div>
+        <h2>Thư viện dùng để kết nối các dịch vụ</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thư viện</th>
+                  <th>Kết nối tới đâu?</th>
+                  <th>Mục đích</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>MQTT.js</td>
+                  <td>EMQX</td>
+                  <td>Kết nối MQTT, đăng ký kênh nhận tin, gửi dữ liệu và tự kết nối lại</td>
+                </tr>
+                <tr>
+                  <td>ioredis</td>
+                  <td>Redis</td>
+                  <td>
+                    Đọc và ghi trạng thái trực tuyến, đang nhập và trạng thái ngắn hạn của bot
+                  </td>
+                </tr>
+                <tr>
+                  <td>Pino</td>
+                  <td>Hệ thống nhật ký</td>
+                  <td>
+                    Ghi nhật ký có cấu trúc để tìm theo dịch vụ, cuộc trò chuyện hoặc tin nhắn
+                  </td>
+                </tr>
+                <tr>
+                  <td>http-proxy</td>
+                  <td>Các dịch vụ nội bộ</td>
+                  <td>Giúp Gateway chuyển HTTP và WebSocket đến đúng dịch vụ</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            MQTT.js chỉ là thư viện kết nối; EMQX mới là máy chủ chuyển tin MQTT. Tương tự, ioredis
+            là thư viện kết nối; Redis mới là nơi giữ dữ liệu.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/mqtt · packages/redis · packages/logger · apps/gateway
+          </p>
+        </div>
+        <div class="slide-footer"><span>2.5</span><strong>09 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-2-6" data-chapter="2">
+        <div class="chapter-no">CHƯƠNG 02 · Hệ thống sử dụng công nghệ nào và để làm gì?</div>
+        <h2>Hạ tầng lưu trữ và truyền dữ liệu</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Công nghệ</th>
+                  <th>Mục đích trong hệ thống</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>PostgreSQL</td>
+                  <td>
+                    Lưu lâu dài người dùng, cuộc trò chuyện, tin nhắn, cảm xúc, mốc đã đọc, Outbox
+                    và dữ liệu bot
+                  </td>
+                </tr>
+                <tr>
+                  <td>Redis</td>
+                  <td>
+                    Lưu dữ liệu cần truy cập nhanh hoặc tự hết hạn như trực tuyến, đang nhập và thời
+                    gian chờ của bot
+                  </td>
+                </tr>
+                <tr>
+                  <td>EMQX</td>
+                  <td>Nhận và chuyển dữ liệu MQTT giữa Web/Mobile với các chương trình xử lý</td>
+                </tr>
+                <tr>
+                  <td>MinIO</td>
+                  <td>Lưu phần dữ liệu thực của ảnh, video, ghi âm và tài liệu</td>
+                </tr>
+                <tr>
+                  <td>Docker Compose</td>
+                  <td>Khởi chạy các dịch vụ hạ tầng trên máy phát triển với cấu hình thống nhất</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            PostgreSQL giữ dữ liệu nghiệp vụ chính thức. Redis giữ trạng thái ngắn hạn. EMQX chuyển
+            dữ liệu nhưng không quyết định nghiệp vụ. MinIO giữ tệp nhưng không lưu thứ tự tin nhắn.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: docker-compose.yml · packages/database · packages/redis ·
+            packages/storage
+          </p>
+        </div>
+        <div class="slide-footer"><span>2.6</span><strong>10 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>Các chữ viết tắt xuất hiện nhiều lần</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Từ viết tắt</th>
+                  <th>Nghĩa cần nhớ trong tài liệu</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>API</td>
+                  <td>Các đường dẫn để ứng dụng lấy hoặc thay đổi dữ liệu ở phía máy chủ</td>
+                </tr>
+                <tr>
+                  <td>HTTP</td>
+                  <td>Cách gửi một yêu cầu và nhận một kết quả</td>
+                </tr>
+                <tr>
+                  <td>MQTT</td>
+                  <td>Giao thức chuyển dữ liệu theo tên kênh giữa nhiều chương trình</td>
+                </tr>
+                <tr>
+                  <td>QoS</td>
+                  <td>Mức MQTT bảo đảm dữ liệu được giao</td>
+                </tr>
+                <tr>
+                  <td>ID</td>
+                  <td>Mã dùng để nhận diện một đối tượng</td>
+                </tr>
+                <tr>
+                  <td>TTL</td>
+                  <td>Thời gian dữ liệu được phép tồn tại trước khi tự hết hạn</td>
+                </tr>
+                <tr>
+                  <td>LWT</td>
+                  <td>Thông báo EMQX tự gửi khi một kết nối mất bất thường</td>
+                </tr>
+                <tr>
+                  <td>MIME</td>
+                  <td>Mã cho biết tệp là ảnh, video, âm thanh hay tài liệu</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Tên đầy đủ bằng tiếng Anh không cần ghi nhớ để theo dõi kiến trúc. Điều quan trọng là
+            biết mỗi thuật ngữ đang chỉ loại dữ liệu hoặc trách nhiệm nào.
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.1</span><strong>11 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3-2" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>MQTT chuyển dữ liệu theo kênh thay vì gọi thẳng từng máy</h2>
+        <div class="slide-content">
+          <p>
+            MQTT là giao thức truyền tin theo mô hình gửi và đăng ký nhận. Bên gửi đưa dữ liệu vào
+            một kênh có tên; EMQX tìm những bên đã đăng ký kênh phù hợp rồi chuyển dữ liệu cho họ.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thuật ngữ</th>
+                  <th>Cách hiểu trong dự án</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Publish — gửi</td>
+                  <td>Đưa dữ liệu vào một kênh MQTT</td>
+                </tr>
+                <tr>
+                  <td>Subscribe — đăng ký nhận</td>
+                  <td>Yêu cầu EMQX chuyển những dữ liệu thuộc kênh quan tâm</td>
+                </tr>
+                <tr>
+                  <td>Topic — tên kênh</td>
+                  <td>
+                    Chuỗi dùng để phân loại và định tuyến, ví dụ
+                    <code>chat/v1/commands/message/send</code>
+                  </td>
+                </tr>
+                <tr>
+                  <td>Broker — máy chủ MQTT</td>
+                  <td>Nhận, so khớp tên kênh và chuyển dữ liệu</td>
+                </tr>
+                <tr>
+                  <td>QoS — mức bảo đảm giao tin</td>
+                  <td>Quy định MQTT có cần xác nhận và gửi lại hay không</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            QoS 0 gửi nhanh nhưng không thử lại khi mất gói, phù hợp với trạng thái đang nhập vì dữ
+            liệu này hết giá trị rất nhanh. QoS 1 yêu cầu xác nhận và có thể gửi lại, phù hợp với
+            yêu cầu tạo tin nhắn; vì có thể nhận trùng nên bên xử lý phải chống trùng.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/mqtt-contracts/src/topics.ts ·
+            packages/mqtt-contracts/src/qos.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.2</span><strong>12 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3-3" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>EMQX nhận, định tuyến và chuyển dữ liệu MQTT</h2>
+        <div class="slide-content">
+          <p>
+            EMQX là máy chủ MQTT của hệ thống. Nó giữ các kết nối, ghi nhận bên nào đang đăng ký
+            kênh nào và chuyển dữ liệu theo tên kênh cùng mức QoS.
+          </p>
+          <p>
+            Ví dụ, Web gửi <code>message.send</code> vào kênh dành cho yêu cầu gửi tin nhắn.
+            <code>chat-worker</code> đã đăng ký kênh đó nên EMQX chuyển yêu cầu tới chương trình
+            này. Sau khi phía máy chủ xử lý xong, sự kiện <code>message.created</code> được gửi lên
+            kênh sự kiện để Web, Mobile, bot và dịch vụ thông báo nhận.
+          </p>
+          <p>
+            Khi chạy nhiều <code>chat-worker</code>, chúng dùng đăng ký dùng chung. EMQX chọn một
+            chương trình xử lý mỗi yêu cầu, thay vì gửi cùng yêu cầu cho tất cả.
+          </p>
+          <p>
+            EMQX không kiểm tra người dùng có thuộc cuộc trò chuyện không, không cấp số thứ tự và
+            không lưu lịch sử chat. Những việc đó do <code>chat-worker</code> và PostgreSQL thực
+            hiện.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/mqtt/src · packages/mqtt-contracts/src/topics.ts ·
+            apps/chat-worker/src/worker.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.3</span><strong>13 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3-4" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>HTTP, WebSocket và MQTT có vai trò khác nhau</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Công nghệ</th>
+                  <th>Dùng khi nào?</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>HTTP</td>
+                  <td>
+                    Ứng dụng hỏi và nhận một kết quả, ví dụ lấy lịch sử, tạo nhóm hoặc tải tệp lên
+                  </td>
+                </tr>
+                <tr>
+                  <td>WebSocket</td>
+                  <td>Giữ một kết nối hai chiều mở lâu giữa ứng dụng và máy chủ</td>
+                </tr>
+                <tr>
+                  <td>MQTT</td>
+                  <td>Đặt quy tắc gửi, nhận, tên kênh và mức bảo đảm trên kết nối đó</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Trên trình duyệt, MQTT chạy bên trong kết nối WebSocket. Gateway nhận kết nối tại
+            <code>/mqtt</code> rồi chuyển nó đến EMQX. Vì vậy WebSocket là đường truyền, còn MQTT là
+            cách các bên tổ chức dữ liệu đi trên đường truyền đó.
+          </p>
+          <pre><code>Lấy dữ liệu hoặc tải tệp:
+Web/Mobile ── HTTP ──→ Gateway ──→ API
+
+Dữ liệu thời gian thực:
+Web/Mobile ── MQTT qua WebSocket ──→ Gateway ──→ EMQX</code></pre>
+          <p class="source">
+            Mã nguồn liên quan: apps/gateway/src/index.ts · apps/api/src · packages/mqtt
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.4</span><strong>14 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3-5" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>Yêu cầu và sự kiện chính thức không phải cùng một loại dữ liệu</h2>
+        <div class="slide-content">
+          <p>
+            Yêu cầu, trong mã nguồn gọi là command, diễn tả việc một bên muốn hệ thống thực hiện.
+            <code>message.send</code> chỉ có nghĩa là ứng dụng muốn gửi tin nhắn; phía máy chủ vẫn
+            có thể từ chối nếu dữ liệu sai hoặc người gửi không có quyền.
+          </p>
+          <p>
+            Sự kiện chính thức, trong mã nguồn gọi là canonical event, mô tả việc đã xảy ra sau khi
+            phía máy chủ kiểm tra và lưu thành công. <code>message.created</code> có nghĩa là tin
+            nhắn đã được tạo, đã có mã của máy chủ và số thứ tự trong cuộc trò chuyện.
+          </p>
+          <pre><code>message.send
+  yêu cầu: hãy tạo tin nhắn này
+           ↓ kiểm tra và lưu
+message.created
+  kết quả: tin nhắn đã được tạo</code></pre>
+          <p>
+            Nếu yêu cầu không hợp lệ, phía máy chủ phát <code>message.rejected</code>. Web và Mobile
+            không được tự phát <code>message.created</code>, vì chúng không phải nơi quyết định dữ
+            liệu chính thức.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/mqtt-contracts/src/commands.ts ·
+            packages/mqtt-contracts/src/events.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.5</span><strong>15 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3-6" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>Khung dữ liệu chung giúp mọi yêu cầu có đủ thông tin</h2>
+        <div class="slide-content">
+          <p>
+            Mỗi yêu cầu và sự kiện đều có phần dữ liệu riêng, nhưng cùng được đặt trong một khung
+            chung, trong mã nguồn gọi là envelope. Khung này chứa phiên bản, loại dữ liệu, thời điểm
+            tạo, người hoặc dịch vụ tạo và mã dùng để lần theo luồng xử lý.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trường</th>
+                  <th>Mục đích</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>requestId</code> hoặc <code>eventId</code></td>
+                  <td>Nhận diện duy nhất một yêu cầu hoặc sự kiện</td>
+                </tr>
+                <tr>
+                  <td><code>actor</code></td>
+                  <td>Người dùng và thiết bị đã gửi yêu cầu</td>
+                </tr>
+                <tr>
+                  <td><code>origin</code></td>
+                  <td>Dịch vụ đã tạo sự kiện</td>
+                </tr>
+                <tr>
+                  <td><code>correlationId</code></td>
+                  <td>Gom các bước thuộc cùng một luồng nghiệp vụ</td>
+                </tr>
+                <tr>
+                  <td><code>causationId</code></td>
+                  <td>Chỉ ra bước ngay trước đã tạo ra dữ liệu hiện tại</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Hai mã cuối đặc biệt hữu ích với bot: có thể lần từ tin nhắn người dùng, qua luật của
+            bot, đến yêu cầu <code>bot.send</code> và tin nhắn trả lời.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/mqtt-contracts/src/envelope.ts ·
+            packages/mqtt-contracts/src/commands.ts · packages/mqtt-contracts/src/events.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.6</span><strong>16 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-3-7" data-chapter="3">
+        <div class="chapter-no">CHƯƠNG 03 · Các khái niệm cần biết trước khi đọc kiến trúc</div>
+        <h2>Outbox tránh trường hợp đã lưu dữ liệu nhưng chưa phát sự kiện</h2>
+        <div class="slide-content">
+          <p>
+            Tạo tin nhắn cần làm hai việc: lưu vào PostgreSQL và gửi
+            <code>message.created</code> lên EMQX. Hai hệ thống này không thể cùng hoàn tất trong
+            một giao dịch. Nếu chương trình dừng sau khi lưu nhưng trước khi gửi sự kiện, dữ liệu
+            trong cơ sở dữ liệu và màn hình người dùng sẽ không khớp.
+          </p>
+          <p>
+            Outbox là bảng chờ phát sự kiện trong PostgreSQL. <code>Message</code> và
+            <code>OutboxEvent</code> được lưu trong cùng một giao dịch. Sau khi giao dịch hoàn tất,
+            chương trình phát Outbox đọc sự kiện chưa gửi, chuyển nó lên EMQX rồi đánh dấu đã gửi.
+          </p>
+          <pre><code>Một giao dịch PostgreSQL
+├─ cập nhật số thứ tự của cuộc trò chuyện
+├─ lưu Message
+└─ lưu OutboxEvent
+       ↓
+chương trình phát Outbox → EMQX</code></pre>
+          <p>
+            Nếu EMQX tạm thời lỗi, sự kiện vẫn nằm trong Outbox để thử lại. Sự kiện có thể được gửi
+            lặp, nên bên nhận vẫn phải nhận biết dữ liệu trùng.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/handlers/messages.ts ·
+            apps/chat-worker/src/outbox.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>3.7</span><strong>17 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-4" data-chapter="4">
+        <div class="chapter-no">CHƯƠNG 04 · Kiến trúc tổng thể</div>
+        <h2>Gateway là cổng vào chung của hệ thống</h2>
+        <div class="slide-content">
+          <p>
+            Gateway chạy tại cổng 3000. Nó nhận yêu cầu từ Web hoặc Mobile, đọc đường dẫn rồi chuyển
+            yêu cầu tới dịch vụ bên trong phù hợp.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Đường dẫn bên ngoài</th>
+                  <th>Nơi nhận bên trong</th>
+                  <th>Mục đích</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>/</code>, <code>/chat</code>, <code>/admin</code></td>
+                  <td>Ứng dụng Web</td>
+                  <td>Hiển thị giao diện chat và quản trị</td>
+                </tr>
+                <tr>
+                  <td><code>/api/*</code>, <code>/media*</code></td>
+                  <td>API</td>
+                  <td>Lấy dữ liệu, thay đổi dữ liệu, tải lên và tải xuống tệp</td>
+                </tr>
+                <tr>
+                  <td><code>/mqtt</code></td>
+                  <td>EMQX</td>
+                  <td>Kết nối MQTT từ Web và Mobile</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <pre><code>Web / Mobile
+      │
+      ▼
+Gateway :3000
+  ├─ trang Web ─────→ Next.js :3100
+  ├─ API và media ──→ NestJS API :3001
+  └─ MQTT ──────────→ EMQX :8083</code></pre>
+          <p>
+            Nhờ có Gateway, Web và Mobile chỉ cần biết một địa chỉ. Các cổng nội bộ của Web, API và
+            EMQX không phải mở trực tiếp cho người dùng.
+          </p>
+          <p class="source">Mã nguồn liên quan: apps/gateway/src/index.ts · docker-compose.yml</p>
+        </div>
+        <div class="slide-footer"><span>4.1</span><strong>18 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-4-2" data-chapter="4">
+        <div class="chapter-no">CHƯƠNG 04 · Kiến trúc tổng thể</div>
+        <h2>API và các chương trình phía sau xử lý hai kiểu công việc</h2>
+        <div class="slide-content">
+          <p>
+            API xử lý theo cách hỏi và trả lời qua HTTP: ứng dụng gửi một yêu cầu rồi chờ kết quả
+            trên cùng kết nối. Các chương trình phía sau nhận công việc từ MQTT hoặc từ cơ sở dữ
+            liệu, nên không cần giữ một yêu cầu HTTP đang chờ.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thành phần</th>
+                  <th>Nhận gì?</th>
+                  <th>Làm gì?</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Gateway</td>
+                  <td>HTTP và WebSocket từ Web/Mobile</td>
+                  <td>Chuyển kết nối tới đúng dịch vụ</td>
+                </tr>
+                <tr>
+                  <td>API</td>
+                  <td>Yêu cầu HTTP</td>
+                  <td>Lịch sử, nhóm chat, thành viên, tệp, bot và trang quản trị</td>
+                </tr>
+                <tr>
+                  <td><code>chat-worker</code></td>
+                  <td>Yêu cầu chat qua MQTT</td>
+                  <td>Kiểm tra quyền, cấp số thứ tự và lưu thay đổi</td>
+                </tr>
+                <tr>
+                  <td><code>bot-worker</code></td>
+                  <td>Sự kiện đã được phía máy chủ xác nhận</td>
+                  <td>Kiểm tra luật và tạo yêu cầu trả lời của bot</td>
+                </tr>
+                <tr>
+                  <td><code>notification-worker</code></td>
+                  <td>Sự kiện tin nhắn mới</td>
+                  <td>Tạo thông báo khi người nhận không trực tuyến</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            API và <code>chat-worker</code> đều có thể thay đổi PostgreSQL, nhưng phục vụ hai luồng
+            khác nhau. Các thao tác cần kết quả HTTP trực tiếp đi qua API; yêu cầu chat thời gian
+            thực đi qua <code>chat-worker</code>.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/api · apps/chat-worker · apps/bot-worker ·
+            apps/notification-worker
+          </p>
+        </div>
+        <div class="slide-footer"><span>4.2</span><strong>19 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-4-3" data-chapter="4">
+        <div class="chapter-no">CHƯƠNG 04 · Kiến trúc tổng thể</div>
+        <h2>Yêu cầu đi vào; kết quả chính thức đi ra</h2>
+        <div class="slide-content">
+          <p>
+            Web hoặc Mobile gửi yêu cầu qua EMQX. <code>chat-worker</code> nhận yêu cầu, kiểm tra và
+            lưu dữ liệu. Cùng lúc, chương trình này ghi một sự kiện vào Outbox. Sau khi dữ liệu đã
+            lưu chắc chắn, chương trình phát Outbox chuyển sự kiện chính thức lên EMQX để các bên
+            liên quan nhận.
+          </p>
+          <pre><code>Web / Mobile
+    │ message.send — yêu cầu gửi tin
+    ▼
+   EMQX
+    ▼
+chat-worker ──→ PostgreSQL
+                    ├─ Message
+                    └─ OutboxEvent
+                           │
+                           ▼
+                    chương trình phát Outbox
+                           │ message.created
+                           ▼
+                          EMQX
+                    ┌──────┼─────────┐
+                    ▼      ▼         ▼
+                   Web   Mobile   Bot/Thông báo</code></pre>
+          <p>
+            Bot cũng phải đi qua <code>chat-worker</code>. Khi muốn trả lời,
+            <code>bot-worker</code> gửi <code>bot.send</code>; <code>chat-worker</code> vẫn kiểm
+            tra, cấp số thứ tự, lưu vào PostgreSQL và phát <code>message.created</code>. Vì vậy tin
+            nhắn của bot được quản lý giống tin nhắn của người dùng.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src · apps/bot-worker/src/transport.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>4.3</span><strong>20 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-5" data-chapter="5">
+        <div class="chapter-no">CHƯƠNG 05 · Mã nguồn được chia như thế nào?</div>
+        <h2>Thư mục apps chứa chương trình; packages chứa phần dùng chung</h2>
+        <div class="slide-content">
+          <p>
+            Toàn bộ hệ thống nằm trong một kho mã nguồn. Thư mục <code>apps/</code> chứa các chương
+            trình có thể chạy riêng. Thư mục <code>packages/</code> chứa những phần được nhiều
+            chương trình dùng chung.
+          </p>
+          <pre><code>MQTT-CHAT/
+├─ apps/
+│  ├─ web                 giao diện Web và trang /admin
+│  ├─ mobile              ứng dụng iOS/Android
+│  ├─ gateway             cổng truy cập chung
+│  ├─ api                 API và xử lý media
+│  ├─ chat-worker         xử lý yêu cầu chat và Outbox
+│  ├─ bot-worker          xử lý luật và lịch chạy của bot
+│  └─ notification-worker xử lý thông báo
+├─ packages/
+│  ├─ mqtt-contracts      tên kênh, mức QoS và cấu trúc dữ liệu MQTT
+│  ├─ realtime-core       phần kết nối MQTT dùng chung cho Web/Mobile
+│  ├─ database            cấu trúc PostgreSQL và Prisma
+│  ├─ redis               quy tắc đặt khóa và thao tác Redis
+│  ├─ storage             kết nối MinIO
+│  └─ mqtt, config, logger, bot-sdk, bot-rules, ui
+└─ scripts/               công cụ phát triển và vận hành</code></pre>
+          <p>
+            Ứng dụng được phép dùng các <code>packages</code>. Ngược lại, phần dùng chung không được
+            phụ thuộc vào một ứng dụng cụ thể. Quy tắc này giúp tránh vòng phụ thuộc và giữ ranh
+            giới giữa các phần rõ ràng.
+          </p>
+          <p class="source">Mã nguồn liên quan: pnpm-workspace.yaml · apps · packages</p>
+        </div>
+        <div class="slide-footer"><span>5.1</span><strong>21 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-5-2" data-chapter="5">
+        <div class="chapter-no">CHƯƠNG 05 · Mã nguồn được chia như thế nào?</div>
+        <h2>Tìm chức năng bằng cách lần theo đường đi của dữ liệu</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Muốn tìm hiểu</th>
+                  <th>Nơi nên mở trước</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Web tạo yêu cầu và hiển thị tin nhắn</td>
+                  <td>apps/web/src/app/chat/page.tsx · apps/web/src/store</td>
+                </tr>
+                <tr>
+                  <td>Mobile quản lý một phiên chat</td>
+                  <td>apps/mobile/src/hooks/useChatSession.ts</td>
+                </tr>
+                <tr>
+                  <td>Đường dẫn API</td>
+                  <td>apps/api/src/controllers</td>
+                </tr>
+                <tr>
+                  <td>Nơi nhận yêu cầu MQTT</td>
+                  <td>apps/chat-worker/src/worker.ts</td>
+                </tr>
+                <tr>
+                  <td>Quy tắc xử lý tin nhắn</td>
+                  <td>apps/chat-worker/src/handlers/messages.ts</td>
+                </tr>
+                <tr>
+                  <td>Cách phát sự kiện từ Outbox</td>
+                  <td>apps/chat-worker/src/outbox.ts</td>
+                </tr>
+                <tr>
+                  <td>Tên kênh và cấu trúc dữ liệu MQTT</td>
+                  <td>packages/mqtt-contracts/src</td>
+                </tr>
+                <tr>
+                  <td>Bảng và ràng buộc cơ sở dữ liệu</td>
+                  <td>packages/database/prisma/schema.prisma</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <pre><code>Thao tác trên giao diện
+→ HTTP hoặc MQTT
+→ nơi nhận yêu cầu
+→ phần xử lý nghiệp vụ
+→ nơi lưu dữ liệu
+→ sự kiện chính thức
+→ dữ liệu trên Web/Mobile
+→ giao diện</code></pre>
+          <p>
+            Khi có lỗi hiển thị, dữ liệu có thể đã sai từ bước nhận yêu cầu, xử lý, lưu hoặc cập
+            nhật Web/Mobile. Đi theo đường dữ liệu giúp xác định đúng bước bắt đầu sai thay vì chỉ
+            sửa thành phần đang hiển thị lỗi.
+          </p>
+        </div>
+        <div class="slide-footer"><span>5.2</span><strong>22 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-6" data-chapter="6">
+        <div class="chapter-no">CHƯƠNG 06 · Luồng gửi tin nhắn từ đầu đến cuối</div>
+        <h2>Ứng dụng tạo bản ghi đang chờ rồi gửi message.send</h2>
+        <div class="slide-content">
+          <p>
+            Khi người dùng bấm Gửi, phần soạn tin tạo <code>clientMessageId</code> bằng
+            <code>crypto.randomUUID()</code>. Mã này đại diện cho đúng một lần gửi, kể cả khi ứng
+            dụng phải gửi lại do mất mạng.
+          </p>
+          <p>
+            Web thêm một <code>PendingMessage</code> vào Zustand. Bản ghi này chứa cuộc trò chuyện,
+            nội dung, loại tin, thông tin trả lời hoặc tệp và trạng thái hiện tại.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trạng thái trong code</th>
+                  <th>Ý nghĩa</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>queued</code></td>
+                  <td>Đang xếp hàng vì kết nối MQTT chưa sẵn sàng</td>
+                </tr>
+                <tr>
+                  <td><code>pending</code></td>
+                  <td>Đã bắt đầu gửi và đang chờ phía máy chủ trả kết quả</td>
+                </tr>
+                <tr>
+                  <td><code>failed</code></td>
+                  <td>Gửi không thành công hoặc phía máy chủ từ chối; có thể thử lại</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            <code>PendingMessage</code> được hiển thị riêng để người dùng biết thao tác đã được ghi
+            nhận. Nó chưa nằm trong danh sách <code>Message</code> chính thức vì chưa có mã máy chủ
+            và số thứ tự.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web/src/components/Composer.tsx ·
+            apps/web/src/store/chat-store.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>6.1</span><strong>23 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-6-2" data-chapter="6">
+        <div class="chapter-no">CHƯƠNG 06 · Luồng gửi tin nhắn từ đầu đến cuối</div>
+        <h2>realtime-core đóng gói yêu cầu và gửi qua EMQX</h2>
+        <div class="slide-content">
+          <p>
+            Dữ liệu <code>message.send</code> gồm <code>conversationId</code>,
+            <code>clientMessageId</code>, loại tin, nội dung, <code>replyToId</code> và thông tin
+            tệp. <code>realtime-core</code> đặt phần dữ liệu này vào khung yêu cầu chung, kiểm tra
+            cấu trúc rồi gửi lên đúng kênh MQTT.
+          </p>
+          <pre><code>Yêu cầu message.send
+├─ version: phiên bản cấu trúc
+├─ requestId: mã yêu cầu
+├─ timestamp: thời điểm tạo
+├─ actor: userId + deviceId
+└─ data
+   ├─ conversationId
+   ├─ clientMessageId
+   ├─ content / type
+   └─ replyToId / thông tin tệp</code></pre>
+          <p>
+            EMQX nhận yêu cầu tại kênh <code>chat/v1/commands/message/send</code>. Nếu có nhiều
+            <code>chat-worker</code>, EMQX chuyển yêu cầu cho một chương trình trong nhóm xử lý.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/realtime-core/src/index.ts ·
+            packages/mqtt-contracts/src/envelope.ts · packages/mqtt-contracts/src/topics.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>6.2</span><strong>24 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-6-3" data-chapter="6">
+        <div class="chapter-no">CHƯƠNG 06 · Luồng gửi tin nhắn từ đầu đến cuối</div>
+        <h2>chat-worker kiểm tra dữ liệu và quyền thực hiện</h2>
+        <div class="slide-content">
+          <p>
+            <code>worker.ts</code> đọc loại yêu cầu rồi chuyển <code>message.send</code> tới
+            <code>handleMessageSend</code>. Phần xử lý kiểm tra:
+          </p>
+          <ul>
+            <li>người gửi và thiết bị có đủ thông tin;</li>
+            <li>dữ liệu có đúng cấu trúc đã quy định;</li>
+            <li>cuộc trò chuyện tồn tại và chưa bị xóa;</li>
+            <li>người gửi là thành viên của cuộc trò chuyện;</li>
+            <li><code>replyToId</code>, nếu có, thuộc cùng cuộc trò chuyện;</li>
+            <li><code>clientMessageId</code> đã được xử lý trước đó hay chưa.</li>
+          </ul>
+          <p>
+            Kiểm tra trên giao diện chỉ giúp người dùng thấy lỗi sớm. Phía máy chủ vẫn phải kiểm tra
+            lại vì mọi dữ liệu từ Web/Mobile đều có thể sai hoặc đã bị thay đổi.
+          </p>
+          <p>
+            Nếu yêu cầu không hợp lệ, <code>chat-worker</code> phát
+            <code>message.rejected</code> kèm <code>clientMessageId</code>. Ứng dụng dựa vào mã này
+            để chuyển đúng bản ghi đang chờ sang trạng thái thất bại.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/worker.ts ·
+            apps/chat-worker/src/handlers/messages.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>6.3</span><strong>25 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-6-4" data-chapter="6">
+        <div class="chapter-no">CHƯƠNG 06 · Luồng gửi tin nhắn từ đầu đến cuối</div>
+        <h2>PostgreSQL cấp số thứ tự và lưu Message cùng OutboxEvent</h2>
+        <div class="slide-content">
+          <p>
+            Trong một giao dịch PostgreSQL, <code>chat-worker</code> tăng
+            <code>Conversation.lastSequence</code>. Giá trị mới trở thành số thứ tự
+            <code>Message.sequence</code>. Cùng giao dịch đó, chương trình lưu
+            <code>Message</code> và <code>OutboxEvent</code> chứa sự kiện
+            <code>message.created</code>.
+          </p>
+          <pre><code>Một giao dịch
+├─ tăng Conversation.lastSequence → số thứ tự mới
+├─ tạo Message
+│  ├─ mã do máy chủ cấp
+│  ├─ clientMessageId
+│  ├─ sequence
+│  └─ nội dung / trả lời / thông tin tệp
+└─ tạo OutboxEvent(message.created)</code></pre>
+          <p>
+            Cấp số thứ tự bằng phép tăng trực tiếp trong giao dịch giúp hai tin nhắn gửi gần như
+            cùng lúc vẫn nhận hai số khác nhau. Ràng buộc duy nhất trên
+            <code>clientMessageId</code> ngăn một lần gửi bị lưu thành hai tin nhắn.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/handlers/messages.ts ·
+            packages/database/prisma/schema.prisma
+          </p>
+        </div>
+        <div class="slide-footer"><span>6.4</span><strong>26 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-6-5" data-chapter="6">
+        <div class="chapter-no">CHƯƠNG 06 · Luồng gửi tin nhắn từ đầu đến cuối</div>
+        <h2>message.created thay bản ghi đang chờ bằng dữ liệu chính thức</h2>
+        <div class="slide-content">
+          <p>
+            Sau khi giao dịch hoàn tất, chương trình phát Outbox gửi
+            <code>message.created</code> lên EMQX. Web nhận sự kiện, thêm hoặc cập nhật
+            <code>Message</code> theo mã do máy chủ cấp và cập nhật thông tin cuộc trò chuyện.
+          </p>
+          <p>
+            Sự kiện cũng mang <code>clientMessageId</code>. Web dùng mã này để xóa đúng
+            <code>PendingMessage</code> tương ứng. Vì danh sách đang chờ và danh sách chính thức
+            được tách riêng, cùng một tin nhắn không bị hiển thị hai lần.
+          </p>
+          <p>
+            Mobile dùng cùng nguyên tắc: tạo một bản ghi đang chờ, nhận
+            <code>message.created</code>, đối chiếu bằng <code>clientMessageId</code>, thêm tin nhắn
+            chính thức rồi xóa bản ghi đang chờ. Khi thử gửi lại, Mobile giữ nguyên
+            <code>clientMessageId</code>.
+          </p>
+          <p>
+            Nếu các số thứ tự cho thấy đang thiếu một đoạn, ứng dụng gọi API lịch sử để lấy các tin
+            còn thiếu, sau đó ghép theo mã và số thứ tự.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web/src/app/chat/page.tsx · apps/web/src/store/chat-store.ts ·
+            apps/mobile/src/features/messaging/message-lifecycle.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>6.5</span><strong>27 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-7" data-chapter="7">
+        <div class="chapter-no">CHƯƠNG 07 · Dữ liệu được lưu ở đâu?</div>
+        <h2>PostgreSQL lưu dữ liệu nghiệp vụ cần tồn tại lâu dài</h2>
+        <div class="slide-content">
+          <p>
+            PostgreSQL là nơi lưu chính thức người dùng, cuộc trò chuyện, thành viên, tin nhắn, cảm
+            xúc, mốc đã đọc, cấu hình bot và Outbox. Dữ liệu vẫn còn sau khi chương trình khởi động
+            lại.
+          </p>
+          <pre><code>User ──→ ConversationMember ──→ Conversation
+                                      │
+                                      ▼
+                                   Message
+                                  ├─ quan hệ trả lời
+                                  └─ MessageReaction
+
+Thay đổi nghiệp vụ ──→ OutboxEvent ──→ sự kiện MQTT
+Bot ──→ BotRule / ScheduledJob / Logs</code></pre>
+          <p>
+            <code>ConversationMember</code> nối người dùng với cuộc trò chuyện và lưu vai trò, mốc
+            đã nhận, mốc đã đọc. <code>Conversation</code> lưu loại chat riêng hoặc chat nhóm và số
+            sequence cuối cùng. <code>Message</code> lưu người gửi, nội dung, loại tin, sequence,
+            quan hệ trả lời và thông tin tệp.
+          </p>
+          <p>
+            Web và Mobile chỉ giữ một bản dữ liệu phục vụ hiển thị. Khi kết nối lại hoặc phát hiện
+            thiếu số thứ tự, ứng dụng lấy lịch sử từ phía máy chủ để bổ sung.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/database/prisma/schema.prisma ·
+            packages/database/prisma/migrations
+          </p>
+        </div>
+        <div class="slide-footer"><span>7.1</span><strong>28 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-7-2" data-chapter="7">
+        <div class="chapter-no">CHƯƠNG 07 · Dữ liệu được lưu ở đâu?</div>
+        <h2>Redis lưu trạng thái thay đổi nhanh hoặc tự hết hạn</h2>
+        <div class="slide-content">
+          <p>
+            Redis đọc và ghi dữ liệu rất nhanh, đồng thời có thể tự xóa dữ liệu sau một khoảng thời
+            gian. Hệ thống dùng Redis cho trạng thái ngắn hạn hoặc dữ liệu có thể tạo lại; lịch sử
+            chat không chỉ được lưu ở Redis.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dữ liệu</th>
+                  <th>Cách sử dụng</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Trạng thái trực tuyến</td>
+                  <td>Lưu danh sách thiết bị đang kết nối của từng người dùng</td>
+                </tr>
+                <tr>
+                  <td>Trạng thái đang nhập</td>
+                  <td>Tự hết hạn sau vài giây nếu không được cập nhật</td>
+                </tr>
+                <tr>
+                  <td>Hỗ trợ tính chưa đọc</td>
+                  <td>Giúp lấy số tin chưa đọc nhanh hơn</td>
+                </tr>
+                <tr>
+                  <td>Trạng thái bot</td>
+                  <td>Ghi nhớ luật đang chạy và thời điểm được phép chạy lại</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            TTL là thời gian một dữ liệu được phép tồn tại trong Redis. Trạng thái đang nhập chỉ có
+            TTL vài giây; nếu ứng dụng mất kết nối mà không gửi “đã dừng nhập”, Redis vẫn tự xóa
+            trạng thái cũ.
+          </p>
+          <p>
+            Trạng thái trực tuyến được theo dõi theo từng thiết bị. Một người dùng chỉ được coi là
+            mất kết nối khi không còn thiết bị nào hoạt động.
+          </p>
+          <p class="source">Mã nguồn liên quan: packages/redis/src</p>
+        </div>
+        <div class="slide-footer"><span>7.2</span><strong>29 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-7-3" data-chapter="7">
+        <div class="chapter-no">CHƯƠNG 07 · Dữ liệu được lưu ở đâu?</div>
+        <h2>MinIO lưu nội dung tệp; PostgreSQL lưu thông tin mô tả</h2>
+        <div class="slide-content">
+          <p>
+            Web hoặc Mobile tải tệp lên API bằng HTTP. API kiểm tra loại tệp, kích thước và các
+            thông tin đi kèm trước khi lưu nội dung tệp vào MinIO. Sau khi lưu, API trả về
+            <code>storageKey</code>, là mã dùng để tìm lại tệp.
+          </p>
+          <pre><code>Nội dung tệp ── HTTP ──→ API ──→ MinIO
+                                  │
+                                  └─ storageKey
+
+storageKey + tên tệp + loại + kích thước
+             └─ message.send ──→ Message trong PostgreSQL
+
+GET /media?key=... ──→ API ──→ nội dung tệp</code></pre>
+          <p>
+            PostgreSQL chỉ lưu <code>storageKey</code>, tên tệp, loại MIME — mã cho biết định dạng
+            tệp — và kích thước. Phần dữ liệu thực của ảnh hoặc tài liệu không nằm trong MQTT và
+            không được ghi trực tiếp vào bảng Message. Cách tách này giữ dữ liệu thời gian thực nhỏ
+            và giúp nơi lưu tệp được quản lý độc lập.
+          </p>
+          <p class="source">Mã nguồn liên quan: apps/api/src · packages/storage/src/index.ts</p>
+        </div>
+        <div class="slide-footer"><span>7.3</span><strong>30 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-8" data-chapter="8">
+        <div class="chapter-no">CHƯƠNG 08 · Các chức năng chính hoạt động như thế nào?</div>
+        <h2>Mỗi kết nối được nhận diện bằng người dùng và thiết bị</h2>
+        <div class="slide-content">
+          <p>
+            Project hiện chưa có đăng nhập. Giao diện cho phép chọn một người dùng có sẵn. Mỗi kết
+            nối được nhận diện bằng cặp <code>userId:deviceId</code>.
+          </p>
+          <p>
+            <code>userId</code> cho biết ai đang thực hiện hành động. <code>deviceId</code> phân
+            biệt các trình duyệt hoặc điện thoại của cùng người dùng. Nhờ đó hệ thống biết một người
+            còn trực tuyến trên thiết bị khác hay đã ngắt toàn bộ kết nối.
+          </p>
+          <p>
+            Khi đổi người dùng, ứng dụng đóng kết nối MQTT cũ, hủy các bộ hẹn giờ, xóa dữ liệu của
+            người trước rồi tải lại dữ liệu cho người mới. Nếu không dọn đúng, danh sách cuộc trò
+            chuyện hoặc tin đang chờ của người trước có thể xuất hiện trong phiên mới.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web/src/app/chat/page.tsx ·
+            apps/mobile/src/hooks/useChatSession.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>8.1</span><strong>31 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-8-2" data-chapter="8">
+        <div class="chapter-no">CHƯƠNG 08 · Các chức năng chính hoạt động như thế nào?</div>
+        <h2>Chat riêng và chat nhóm có cách tạo khác nhau</h2>
+        <div class="slide-content">
+          <p>
+            Chat riêng dùng <code>directPairKey</code>, một khóa được tạo ổn định từ mã của hai
+            người dùng. PostgreSQL không cho phép hai cuộc trò chuyện có cùng khóa này. Vì vậy hai
+            yêu cầu tạo chat riêng xảy ra gần nhau vẫn dẫn đến một cuộc trò chuyện duy nhất.
+          </p>
+          <p>
+            Chat nhóm được tạo qua API. Phía máy chủ lưu nhóm, thành viên và vai trò trong cùng một
+            giao dịch, sau đó ghi sự kiện vào Outbox để Web và Mobile cập nhật danh sách.
+          </p>
+          <p>
+            Quản trị viên nhóm có thể thêm hoặc xóa thành viên; thành viên có thể rời nhóm. Khi xóa
+            nhóm, phía máy chủ ghi thời điểm vào <code>deletedAt</code> thay vì xóa ngay toàn bộ dữ
+            liệu. Cách này gọi là xóa mềm: nhóm không còn xuất hiện và không nhận tin mới, nhưng
+            lịch sử vẫn được bảo toàn.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/api/src/controllers · packages/database/prisma/schema.prisma
+          </p>
+        </div>
+        <div class="slide-footer"><span>8.2</span><strong>32 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-8-3" data-chapter="8">
+        <div class="chapter-no">CHƯƠNG 08 · Các chức năng chính hoạt động như thế nào?</div>
+        <h2>Trả lời, sửa, xóa và thả cảm xúc đều được phía máy chủ kiểm tra</h2>
+        <div class="slide-content">
+          <p>
+            Khi trả lời một tin nhắn, yêu cầu mang theo <code>replyToId</code>.
+            <code>chat-worker</code> kiểm tra tin được trả lời có tồn tại và có thuộc cùng cuộc trò
+            chuyện không.
+          </p>
+          <p>
+            Khi sửa hoặc xóa, phía máy chủ kiểm tra người thực hiện có quyền với tin nhắn. Sau khi
+            thay đổi PostgreSQL, phía máy chủ phát <code>message.edited</code> hoặc
+            <code>message.deleted</code>. Ứng dụng dùng mã tin nhắn do máy chủ cấp để sửa đúng bản
+            ghi đang hiển thị.
+          </p>
+          <p>
+            Thả cảm xúc cũng đi theo cặp yêu cầu và sự kiện. PostgreSQL không cho phép cùng một
+            người thêm trùng một biểu tượng cảm xúc trên cùng tin nhắn.
+          </p>
+          <pre><code>Người dùng bấm 👍
+→ gửi reaction.add
+→ kiểm tra thành viên và tin nhắn
+→ lưu MessageReaction và OutboxEvent
+→ phát reaction.added
+→ Web/Mobile cập nhật đúng tin nhắn</code></pre>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/handlers · packages/mqtt-contracts/src
+          </p>
+        </div>
+        <div class="slide-footer"><span>8.3</span><strong>33 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-8-4" data-chapter="8">
+        <div class="chapter-no">CHƯƠNG 08 · Các chức năng chính hoạt động như thế nào?</div>
+        <h2>Trực tuyến, đang nhập, đã nhận và đã đọc là bốn trạng thái khác nhau</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trạng thái</th>
+                  <th>Nó cho biết điều gì?</th>
+                  <th>Nơi xử lý chính</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Trực tuyến</td>
+                  <td>Người dùng còn ít nhất một thiết bị đang kết nối</td>
+                  <td>Redis và sự kiện MQTT</td>
+                </tr>
+                <tr>
+                  <td>Đang nhập</td>
+                  <td>Người dùng vừa nhập nội dung trong vài giây gần nhất</td>
+                  <td>Redis với thời gian tự hết hạn</td>
+                </tr>
+                <tr>
+                  <td>Đã nhận</td>
+                  <td>Thiết bị đã nhận liên tục đến số thứ tự nào</td>
+                  <td><code>lastDeliveredSequence</code></td>
+                </tr>
+                <tr>
+                  <td>Đã đọc</td>
+                  <td>Người dùng đã đọc liên tục đến số thứ tự nào</td>
+                  <td><code>lastReadSequence</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Nếu kết nối mất bất thường, ứng dụng không thể chủ động báo đã ngắt. Khi kết nối, ứng
+            dụng đã đăng ký trước một thông báo mất kết nối với EMQX, gọi là LWT. EMQX tự gửi thông
+            báo này khi phát hiện thiết bị biến mất.
+          </p>
+          <p>
+            Mốc đã nhận và đã đọc chỉ tăng. Ví dụ <code>lastReadSequence = 120</code> nghĩa là các
+            tin nhắn có số thứ tự từ 120 trở xuống đã được đọc; một sự kiện cũ không được làm giá
+            trị này giảm xuống.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/redis/src · apps/chat-worker/src/handlers/receipts.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>8.4</span><strong>34 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-8-5" data-chapter="8">
+        <div class="chapter-no">CHƯƠNG 08 · Các chức năng chính hoạt động như thế nào?</div>
+        <h2>Gửi tệp gồm bước tải tệp và bước gửi tin nhắn</h2>
+        <div class="slide-content">
+          <p>
+            Nội dung tệp không đi qua MQTT. Web hoặc Mobile tải tệp lên API trước, nhận
+            <code>storageKey</code> và thông tin mô tả, sau đó mới đưa các thông tin này vào yêu cầu
+            <code>message.send</code>.
+          </p>
+          <pre><code>Người dùng chọn tệp
+  ├─ nội dung tệp ──→ tải lên qua HTTP ──→ MinIO
+  │                                      │
+  └──────────────── storageKey + thông tin
+                                         │
+                                         ▼
+                                  message.send
+                                         │
+                                         ▼
+                              Message + OutboxEvent</code></pre>
+          <p>
+            Người nhận thấy tin nhắn có loại ảnh, video, ghi âm hoặc tài liệu. Ứng dụng dùng loại
+            tin và mã MIME để chọn cách hiển thị, rồi tải nội dung qua <code>/media</code>.
+          </p>
+          <p>
+            Nếu tải tệp lên thành công nhưng gửi tin nhắn thất bại, tệp đó chưa được coi là một tin
+            nhắn đã gửi. Hệ thống cần có cơ chế dọn các tệp không còn được tham chiếu.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web · apps/mobile · apps/api · packages/storage
+          </p>
+        </div>
+        <div class="slide-footer"><span>8.5</span><strong>35 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-8-6" data-chapter="8">
+        <div class="chapter-no">CHƯƠNG 08 · Các chức năng chính hoạt động như thế nào?</div>
+        <h2>Lệnh bắt đầu bằng dấu / được viết ngay trong ô chat</h2>
+        <div class="slide-content">
+          <p>
+            Tin nhắn chữ bắt đầu bằng ký tự <code>/</code> thường được gọi là slash command trong mã
+            nguồn. Từ ngay sau dấu <code>/</code> là tên lệnh; phần còn lại là tham số nếu lệnh cần
+            thêm thông tin. Ví dụ <code>/ping</code> có tên lệnh là <code>ping</code>.
+          </p>
+          <p>
+            Đây chỉ là quy ước đọc nội dung tin nhắn, không phải một giao thức hay kênh MQTT riêng.
+            <code>chat-worker</code> vẫn lưu <code>/ping</code> như tin nhắn chữ thông thường rồi
+            phát <code>message.created</code>.
+          </p>
+          <p>
+            <code>bot-worker</code> nhận sự kiện, đọc nội dung, tìm luật phù hợp và gửi yêu cầu
+            <code>bot.send</code>. Yêu cầu này quay lại <code>chat-worker</code> để được kiểm tra,
+            cấp số thứ tự và lưu như các tin nhắn khác.
+          </p>
+          <pre><code>Tin nhắn chữ &quot;/ping&quot;
+→ chat-worker lưu tin và phát message.created
+→ bot-worker nhận ra lệnh ping
+→ gửi bot.send
+→ chat-worker lưu tin trả lời của bot</code></pre>
+          <p>
+            Theo mặc định, bot bỏ qua tin nhắn do bot khác tạo. Cùng với thời gian chờ giữa hai lần
+            chạy và các mã lần theo luồng, quy tắc này ngăn bot tự kích hoạt lặp vô hạn.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/database/src/seed.ts · apps/bot-worker/src ·
+            apps/chat-worker/src/handlers/bot-send.ts
+          </p>
+        </div>
+        <div class="slide-footer"><span>8.6</span><strong>36 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-9" data-chapter="9">
+        <div class="chapter-no">CHƯƠNG 09 · Web và Mobile giữ dữ liệu trên màn hình ra sao?</div>
+        <h2>Ứng dụng đăng ký nhận sự kiện trước khi tải dữ liệu ban đầu</h2>
+        <div class="slide-content">
+          <p>
+            Khi mở ứng dụng, Web hoặc Mobile kết nối MQTT và đăng ký các kênh cần nhận trước. Chỉ
+            sau khi EMQX xác nhận đăng ký xong, ứng dụng mới gọi API để lấy danh sách cuộc trò
+            chuyện và lịch sử ban đầu.
+          </p>
+          <p>
+            Nếu tải lịch sử trước rồi mới đăng ký MQTT, một sự kiện xuất hiện ở khoảng giữa hai bước
+            có thể bị bỏ lỡ. Vì vậy những sự kiện đến trong lúc API đang tải được giữ tạm, rồi ghép
+            vào dữ liệu ban đầu khi API trả về.
+          </p>
+          <pre><code>Kết nối MQTT
+→ đăng ký các kênh sự kiện
+→ giữ tạm sự kiện mới
+→ tải dữ liệu ban đầu bằng HTTP
+→ ghép theo mã và số thứ tự
+→ tiếp tục nhận dữ liệu thời gian thực</code></pre>
+          <p>
+            Khi ghép, ứng dụng không chỉ nối hai danh sách. Nếu mã tin nhắn đã có thì cập nhật, nếu
+            chưa có mới thêm, sau đó sắp theo số thứ tự do phía máy chủ cấp.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/realtime-core/src · apps/web/src/app/chat/page.tsx
+          </p>
+        </div>
+        <div class="slide-footer"><span>9.1</span><strong>37 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-9-2" data-chapter="9">
+        <div class="chapter-no">CHƯƠNG 09 · Web và Mobile giữ dữ liệu trên màn hình ra sao?</div>
+        <h2>Tin đang gửi có vòng đời riêng trên Web và Mobile</h2>
+        <div class="slide-content">
+          <p>
+            Web giữ <code>PendingMessage</code> trong Zustand; Mobile giữ bản ghi tương tự trong
+            <code>MessageLifecycleStore</code>. Bản ghi đang chờ chứa <code>clientMessageId</code>,
+            cuộc trò chuyện, nội dung, thông tin tệp hoặc trả lời và trạng thái gửi.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trạng thái</th>
+                  <th>Người mới cần hiểu</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>queued</code></td>
+                  <td>Chưa gửi được vì kết nối chưa sẵn sàng</td>
+                </tr>
+                <tr>
+                  <td><code>pending</code></td>
+                  <td>Đã bắt đầu gửi và đang chờ phía máy chủ xác nhận</td>
+                </tr>
+                <tr>
+                  <td><code>failed</code></td>
+                  <td>Không gửi thành công; người dùng có thể thử lại</td>
+                </tr>
+                <tr>
+                  <td>Đã đối chiếu</td>
+                  <td>Đã nhận <code>message.created</code>; bản ghi đang chờ được xóa</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Khi <code>message.created</code> quay về, ứng dụng thêm hoặc cập nhật tin nhắn chính
+            thức theo mã máy chủ, rồi dùng <code>clientMessageId</code> để xóa đúng bản ghi đang
+            chờ. Đây là bước đối chiếu dữ liệu đã gửi với kết quả từ phía máy chủ.
+          </p>
+          <p>
+            Khi kết nối lại, ứng dụng đăng ký lại các kênh MQTT và gọi API lấy những tin nhắn sau số
+            thứ tự cuối cùng đang có. MQTT mang sự kiện mới; HTTP bổ sung phần lịch sử bị thiếu
+            trong thời gian mất kết nối.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/web/src/store/chat-store.ts ·
+            apps/mobile/src/features/messaging · packages/realtime-core/src
+          </p>
+        </div>
+        <div class="slide-footer"><span>9.2</span><strong>38 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-9-3" data-chapter="9">
+        <div class="chapter-no">CHƯƠNG 09 · Web và Mobile giữ dữ liệu trên màn hình ra sao?</div>
+        <h2>Web và Mobile dùng chung quy tắc nhưng có cách quản lý riêng</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Phần</th>
+                  <th>Web</th>
+                  <th>Mobile</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Giao diện</td>
+                  <td>Next.js và React trong trình duyệt</td>
+                  <td>React Native trên iOS/Android</td>
+                </tr>
+                <tr>
+                  <td>Nơi giữ dữ liệu</td>
+                  <td>Zustand và các hàm của trang chat</td>
+                  <td><code>useChatSession</code> và phần quản lý trạng thái gửi</td>
+                </tr>
+                <tr>
+                  <td>Kết nối MQTT</td>
+                  <td>WebSocket qua Gateway <code>/mqtt</code></td>
+                  <td>WebSocket gắn với trạng thái mạng và vòng đời ứng dụng</td>
+                </tr>
+                <tr>
+                  <td>Chọn tệp</td>
+                  <td>Bộ chọn tệp của trình duyệt</td>
+                  <td>Bộ chọn ảnh hoặc tài liệu của điện thoại</td>
+                </tr>
+                <tr>
+                  <td>Kết nối lại</td>
+                  <td>Thực hiện khi mạng hoặc WebSocket quay lại</td>
+                  <td>Thực hiện khi mạng quay lại hoặc ứng dụng mở lại</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Hai ứng dụng dùng chung tên kênh, cấu trúc dữ liệu MQTT và phần kết nối cơ bản. Tuy
+            nhiên chúng không dùng chung toàn bộ nơi giữ dữ liệu vì trình duyệt và ứng dụng điện
+            thoại có vòng đời khác nhau.
+          </p>
+          <p>
+            Khi lỗi chỉ xảy ra trên một nền tảng, cần kiểm tra: dữ liệu từ giao diện, bản ghi đang
+            chờ, yêu cầu đã gửi, sự kiện đã nhận, bước đối chiếu và cuối cùng là phần hiển thị.
+          </p>
+          <p class="source">Mã nguồn liên quan: apps/web · apps/mobile · packages/realtime-core</p>
+        </div>
+        <div class="slide-footer"><span>9.3</span><strong>39 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-10" data-chapter="10">
+        <div class="chapter-no">
+          CHƯƠNG 10 · Hệ thống tránh mất, trùng và sai thứ tự như thế nào?
+        </div>
+        <h2>Gửi lại cùng một yêu cầu không tạo thêm dữ liệu</h2>
+        <div class="slide-content">
+          <p>
+            Với MQTT QoS 1, EMQX cố gắng giao dữ liệu ít nhất một lần. Khi chưa nhận được xác nhận,
+            dữ liệu có thể được gửi lại. Web hoặc Mobile cũng có thể thử lại nếu mất mạng trước khi
+            biết lần gửi trước đã thành công hay chưa.
+          </p>
+          <p>
+            Vì vậy hệ thống phải xử lý lặp mà vẫn cho cùng một kết quả. Tính chất này gọi là
+            idempotency trong code và tài liệu kỹ thuật.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Loại dữ liệu</th>
+                  <th>Cách tránh trùng</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Tin nhắn</td>
+                  <td>
+                    Mỗi lần gửi giữ nguyên <code>clientMessageId</code>; PostgreSQL không cho phép
+                    trùng mã này
+                  </td>
+                </tr>
+                <tr>
+                  <td>Cảm xúc</td>
+                  <td>Một người không thể thêm trùng cùng emoji trên một tin nhắn</td>
+                </tr>
+                <tr>
+                  <td>Mốc đã nhận/đã đọc</td>
+                  <td>Chỉ nhận giá trị lớn hơn hiện tại</td>
+                </tr>
+                <tr>
+                  <td>Dữ liệu trên Web/Mobile</td>
+                  <td>Có mã rồi thì cập nhật, chưa có mới thêm</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            <code>clientMessageId</code> được tạo trước khi gửi. Phía máy chủ dùng nó để nhận ra yêu
+            cầu đã xử lý; ứng dụng dùng nó để nối kết quả <code>message.created</code> với đúng bản
+            ghi đang chờ.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/database/prisma/schema.prisma · apps/web/src/store ·
+            apps/mobile/src/features
+          </p>
+        </div>
+        <div class="slide-footer"><span>10.1</span><strong>40 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-10-2" data-chapter="10">
+        <div class="chapter-no">
+          CHƯƠNG 10 · Hệ thống tránh mất, trùng và sai thứ tự như thế nào?
+        </div>
+        <h2>Số sequence tạo một thứ tự chung trong mỗi cuộc trò chuyện</h2>
+        <div class="slide-content">
+          <p>
+            Thứ tự gói tin đến thiết bị không luôn là thứ tự tin nhắn. Kết nối lại, gửi lại hoặc độ
+            trễ mạng có thể làm sự kiện đến muộn hay đảo vị trí.
+          </p>
+          <p>
+            Mỗi cuộc trò chuyện có <code>lastSequence</code>. Khi tạo tin nhắn,
+            <code>chat-worker</code> tăng giá trị này trong giao dịch và gán số mới cho
+            <code>Message.sequence</code>. Vì vậy thứ tự cuối cùng do phía máy chủ quyết định, không
+            phụ thuộc gói nào đến thiết bị trước.
+          </p>
+          <pre><code>Thứ tự máy chủ cấp:  120 → 121 → 122
+Thứ tự thiết bị nhận: 122 → 121
+Thứ tự hiển thị:      121 → 122</code></pre>
+          <p>
+            Nếu ứng dụng đang có 120 nhưng nhận 122, nó biết đang thiếu 121. Ứng dụng gọi API lịch
+            sử để lấy dữ liệu sau mốc 120. Sắp xếp giải quyết việc đến sai thứ tự; gọi lại lịch sử
+            giải quyết việc thiếu dữ liệu.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/handlers/messages.ts ·
+            packages/realtime-core/src
+          </p>
+        </div>
+        <div class="slide-footer"><span>10.2</span><strong>41 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-10-3" data-chapter="10">
+        <div class="chapter-no">
+          CHƯƠNG 10 · Hệ thống tránh mất, trùng và sai thứ tự như thế nào?
+        </div>
+        <h2>Outbox bảo vệ khoảng giữa lúc lưu dữ liệu và phát sự kiện</h2>
+        <div class="slide-content">
+          <p>
+            PostgreSQL và EMQX là hai hệ thống riêng. Nếu <code>Message</code> đã được lưu nhưng
+            chương trình dừng trước khi gửi <code>message.created</code>, người đang trực tuyến sẽ
+            không biết có tin nhắn mới.
+          </p>
+          <p>
+            Outbox giải quyết bằng cách lưu <code>Message</code> và <code>OutboxEvent</code> trong
+            cùng một giao dịch PostgreSQL. Một chương trình riêng đọc các sự kiện chưa gửi, chuyển
+            chúng lên EMQX rồi ghi lại thời điểm đã gửi.
+          </p>
+          <pre><code>Bắt đầu giao dịch
+  lưu Message
+  lưu OutboxEvent
+Hoàn tất giao dịch
+        ↓
+chương trình phát Outbox
+  gửi sự kiện → EMQX
+  ghi thời điểm đã gửi</code></pre>
+          <p>
+            Nếu EMQX tạm thời lỗi, <code>OutboxEvent</code> vẫn còn để thử lại. Nếu sự kiện đã gửi
+            nhưng chưa kịp ghi thời điểm, nó có thể được gửi lần nữa; vì vậy bên nhận vẫn cần cơ chế
+            chống trùng.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/outbox.ts ·
+            packages/database/prisma/schema.prisma
+          </p>
+        </div>
+        <div class="slide-footer"><span>10.3</span><strong>42 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-10-4" data-chapter="10">
+        <div class="chapter-no">
+          CHƯƠNG 10 · Hệ thống tránh mất, trùng và sai thứ tự như thế nào?
+        </div>
+        <h2>Khi kết nối lại, MQTT và HTTP cùng phục hồi dữ liệu</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tình huống</th>
+                  <th>Hệ thống xử lý thế nào?</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Mất mạng trước khi gửi</td>
+                  <td>Giữ yêu cầu đang chờ và thử lại bằng cùng <code>clientMessageId</code></td>
+                </tr>
+                <tr>
+                  <td>Mất mạng ngay sau khi gửi</td>
+                  <td>Chờ sự kiện chính thức hoặc hỏi lại lịch sử</td>
+                </tr>
+                <tr>
+                  <td>Nhận sự kiện lặp</td>
+                  <td>Cập nhật theo mã thay vì thêm một bản ghi mới</td>
+                </tr>
+                <tr>
+                  <td>Nhận sự kiện trễ</td>
+                  <td>Sắp tin nhắn theo số sequence</td>
+                </tr>
+                <tr>
+                  <td>Thiếu một đoạn sequence</td>
+                  <td>Gọi API lấy phần lịch sử sau mốc cuối cùng</td>
+                </tr>
+                <tr>
+                  <td>Chương trình xử lý dừng giữa chừng</td>
+                  <td>EMQX có thể giao lại yêu cầu chưa được xác nhận</td>
+                </tr>
+                <tr>
+                  <td>EMQX lỗi sau khi PostgreSQL đã lưu</td>
+                  <td>Outbox giữ sự kiện để gửi lại</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Khi được yêu cầu dừng, chương trình ngừng nhận việc mới, chờ phần đang xử lý kết thúc
+            rồi mới đóng MQTT, Redis và PostgreSQL. Trong tài liệu kỹ thuật, cách dừng có thứ tự này
+            gọi là graceful shutdown; mục đích là tránh bỏ dở thay đổi giữa chừng.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: apps/chat-worker/src/index.ts · apps/chat-worker/src/worker.ts ·
+            packages/mqtt/src
+          </p>
+        </div>
+        <div class="slide-footer"><span>10.4</span><strong>43 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-11" data-chapter="11">
+        <div class="chapter-no">CHƯƠNG 11 · Tổng kết và cách lần theo một tính năng</div>
+        <h2>Mỗi thành phần chịu trách nhiệm cho một phần rõ ràng</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Thành phần</th>
+                  <th>Trách nhiệm</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Gateway</td>
+                  <td>Cung cấp một địa chỉ chung và chuyển kết nối tới đúng dịch vụ</td>
+                </tr>
+                <tr>
+                  <td>API</td>
+                  <td>Xử lý lịch sử, nhóm chat, thành viên, tệp, bot và quản trị qua HTTP</td>
+                </tr>
+                <tr>
+                  <td>EMQX</td>
+                  <td>Chuyển dữ liệu MQTT theo tên kênh và mức QoS</td>
+                </tr>
+                <tr>
+                  <td><code>chat-worker</code></td>
+                  <td>Kiểm tra yêu cầu chat và quyết định thay đổi nào được lưu</td>
+                </tr>
+                <tr>
+                  <td>PostgreSQL</td>
+                  <td>Lưu dữ liệu nghiệp vụ chính thức và Outbox</td>
+                </tr>
+                <tr>
+                  <td>Redis</td>
+                  <td>Lưu trạng thái trực tuyến, đang nhập và dữ liệu ngắn hạn</td>
+                </tr>
+                <tr>
+                  <td>MinIO</td>
+                  <td>Lưu nội dung ảnh, video, ghi âm và tài liệu</td>
+                </tr>
+                <tr>
+                  <td>Web/Mobile</td>
+                  <td>Giữ dữ liệu phục vụ hiển thị và đồng bộ theo phía máy chủ</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <pre><code>Web/Mobile gửi yêu cầu
+→ EMQX chuyển tới chat-worker
+→ chat-worker kiểm tra nghiệp vụ
+→ PostgreSQL lưu thay đổi và Outbox
+→ phía máy chủ phát sự kiện chính thức
+→ Web/Mobile cập nhật màn hình</code></pre>
+          <p>
+            Điểm cần nhớ: EMQX chỉ chuyển dữ liệu. <code>chat-worker</code> mới kiểm tra quyền và
+            quyết định kết quả. PostgreSQL mới là nơi lưu kết quả chính thức.
+          </p>
+        </div>
+        <div class="slide-footer"><span>11.1</span><strong>44 / 45</strong></div>
+      </section>
+      <section class="slide" id="chapter-11-2" data-chapter="11">
+        <div class="chapter-no">CHƯƠNG 11 · Tổng kết và cách lần theo một tính năng</div>
+        <h2>Khi có lỗi, kiểm tra theo đúng đường đi của dữ liệu</h2>
+        <div class="slide-content">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nhóm chức năng</th>
+                  <th>Đường nên kiểm tra</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Gửi/trả lời/cảm xúc</td>
+                  <td>
+                    Giao diện → realtime-core → mqtt-contracts → chat-worker → PostgreSQL/Outbox →
+                    dữ liệu ứng dụng
+                  </td>
+                </tr>
+                <tr>
+                  <td>Nhóm/thành viên</td>
+                  <td>Web/Mobile → API → PostgreSQL/Outbox → sự kiện cuộc trò chuyện</td>
+                </tr>
+                <tr>
+                  <td>Trực tuyến/đang nhập</td>
+                  <td>Kết nối MQTT → chương trình xử lý → Redis → sự kiện → giao diện</td>
+                </tr>
+                <tr>
+                  <td>Đã nhận/đã đọc</td>
+                  <td>Yêu cầu từ ứng dụng → xử lý mốc sequence → sự kiện</td>
+                </tr>
+                <tr>
+                  <td>Tệp</td>
+                  <td>
+                    Bộ chọn tệp → API tải lên → MinIO → thông tin trong Message → đường dẫn media
+                  </td>
+                </tr>
+                <tr>
+                  <td>Bot</td>
+                  <td>
+                    <code>message.created</code> → bot-worker → <code>bot.send</code> → chat-worker
+                  </td>
+                </tr>
+                <tr>
+                  <td>Web và Mobile khác nhau</td>
+                  <td>Dữ liệu HTTP → sự kiện MQTT → nơi giữ dữ liệu → phần hiển thị</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Thứ tự kiểm tra thực tế:</p>
+          <ol>
+            <li>Dữ liệu đi vào có đúng cấu trúc và đúng người dùng không?</li>
+            <li>Phía máy chủ đã áp dụng quy tắc nào và trả lỗi gì?</li>
+            <li>PostgreSQL, Redis hoặc MinIO đang lưu gì?</li>
+            <li>Outbox có sự kiện chưa, sự kiện đã được gửi chưa?</li>
+            <li>Web/Mobile có đăng ký đúng kênh và nhận đúng dữ liệu không?</li>
+            <li>Dữ liệu trên ứng dụng đã thêm, cập nhật hoặc đối chiếu đúng chưa?</li>
+            <li>Thành phần giao diện có hiển thị đúng dữ liệu đó không?</li>
+          </ol>
+          <p>
+            Đi theo thứ tự này giúp tìm nơi dữ liệu bắt đầu sai, thay vì chỉ sửa phần cuối đang biểu
+            hiện lỗi.
+          </p>
+          <p class="source">
+            Mã nguồn liên quan: packages/mqtt-contracts · apps/chat-worker · packages/database ·
+            packages/realtime-core
+          </p>
+        </div>
+        <div class="slide-footer"><span>11.2</span><strong>45 / 45</strong></div>
+      </section>
+    </main>
+    <div class="keyboard">↑ ↓ chuyển màn</div>
+    <script>
+      const slides = [...document.querySelectorAll(".slide")];
+      const links = [...document.querySelectorAll("nav a")];
+      const activate = (chapter) =>
+        links.forEach((link) =>
+          link.classList.toggle("active", link.getAttribute("href") === "#chapter-" + chapter),
+        );
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((entry) => entry.isIntersecting)
+            .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+          if (visible) activate(visible.target.dataset.chapter);
+        },
+        { threshold: [0.35, 0.6] },
+      );
+      slides.forEach((slide) => observer.observe(slide));
+      document.addEventListener("keydown", (event) => {
+        if (
+          !["ArrowDown", "ArrowRight", "PageDown", "ArrowUp", "ArrowLeft", "PageUp"].includes(
+            event.key,
+          )
+        )
+          return;
+        if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+        event.preventDefault();
+        const current = slides.reduce(
+          (best, slide, index) =>
+            Math.abs(slide.getBoundingClientRect().top - 16) < best.distance
+              ? { index, distance: Math.abs(slide.getBoundingClientRect().top - 16) }
+              : best,
+          { index: 0, distance: Infinity },
+        ).index;
+        const forward = ["ArrowDown", "ArrowRight", "PageDown"].includes(event.key);
+        slides[
+          Math.max(0, Math.min(slides.length - 1, current + (forward ? 1 : -1)))
+        ].scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    </script>
+  </body>
+</html>
