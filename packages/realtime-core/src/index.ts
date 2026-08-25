@@ -498,5 +498,7 @@ export class ChatRealtimeClient {
 }
 
 // ---- Canonical client-side helpers shared by web + mobile -----------------
-// Monotonic read-watermark merge both reducers must go through.
+// Deterministic avatar/initials presentation keyed by stable identity, and
+// the monotonic read-watermark merge both reducers must go through.
+export * from "./user-presentation";
 export * from "./read-watermark";
