@@ -43,20 +43,21 @@ function timeLabel(iso: string | null | undefined): string {
 const Row = React.memo(function Row({
   conversation,
   title,
+  avatarColorKey,
   presenceOnline,
   identityUserId,
   onPress,
 }: {
   conversation: ApiConversation;
   title: string;
+  avatarColorKey: string;
   presenceOnline: boolean | undefined;
   identityUserId: string | null;
   onPress: (id: string) => void;
 }): React.JSX.Element {
-  // Canonical color key = the stable conversation id for BOTH group and DM
-  // rows (REG-05): hashing the peer's display title made the same user wear
-  // different colors on web vs mobile and drift when a display name changes.
-  const avatar = avatarColorFor(conversation.id);
+  // A DIRECT row represents the peer user; a GROUP row represents the
+  // conversation. The caller supplies the matching stable identity key.
+  const avatar = avatarColorFor(avatarColorKey);
   const isGroup = conversation.type === 'GROUP';
   // Unread = canonical lastSequence minus MY read watermark (§8) — never a
   // local-only counter.
@@ -74,9 +75,12 @@ const Row = React.memo(function Row({
         unread > 0 ? `${unread} unread.` : ''
       }`}
     >
-      <View style={[styles.avatar, { backgroundColor: avatar.bg }]}>
-        <Text style={styles.avatarText}>
-          {title.slice(0, isGroup ? 2 : 1).toUpperCase()}
+      <View
+        testID={`conversation-avatar-${conversation.id}`}
+        style={[styles.avatar, { backgroundColor: avatar.bg }]}
+      >
+        <Text style={[styles.avatarText, { color: avatar.fg }]}>
+          {initialsFromDisplayName(title)}
         </Text>
         {/* Presence only where meaningful (§8): DM peers, tri-state. */}
         {!isGroup && presenceOnline === true && (
@@ -175,21 +179,24 @@ export function ConversationListScreen({
   };
 
   const degraded = status !== 'connected';
+  const identityAvatar = avatarColorFor(identityUserId ?? '?');
 
   return (
     <View style={styles.container}>
       {/* Header (§7): profile · title+status-dot · search · new */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable
+          testID="profile-avatar"
           style={({ pressed }) => [
             styles.profileBtn,
+            { backgroundColor: identityAvatar.bg },
             pressed && styles.pressed,
           ]}
           onPress={onProfile}
           accessibilityRole="button"
           accessibilityLabel="Profile"
         >
-          <Text style={styles.profileText}>
+          <Text style={[styles.profileText, { color: identityAvatar.fg }]}>
             {initialsFromDisplayName(identityDisplayName)}
           </Text>
         </Pressable>
@@ -260,10 +267,14 @@ export function ConversationListScreen({
           const peerId = item.members?.find(
             m => m.userId !== identityUserId,
           )?.userId;
+          const title = titleFor(item);
           return (
             <Row
               conversation={item}
-              title={titleFor(item)}
+              title={title}
+              avatarColorKey={
+                item.type === 'GROUP' ? item.id : (peerId ?? item.id)
+              }
               presenceOnline={presence[peerId ?? '']}
               identityUserId={identityUserId}
               onPress={onOpen}
@@ -318,7 +329,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: radius.full,
-    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },

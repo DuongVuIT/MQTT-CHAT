@@ -156,15 +156,19 @@ export default function ChatPage() {
     };
   }, [router]);
 
+  const activePeerId =
+    activeConversation?.type === "DIRECT"
+      ? activeConversation.members?.find((member) => member.userId !== identityUserId)?.userId
+      : undefined;
+
   // Peer-relative DIRECT label: A sees B's name, B sees A's name.
   const activeTitle = (() => {
     if (!activeConversation) return "";
     if (activeConversation.type === "GROUP") {
       return activeConversation.title ?? "Group";
     }
-    const peerId = activeConversation.members?.find((m) => m.userId !== identityUserId)?.userId;
-    const peer = users.find((u) => u.id === peerId);
-    return peer?.displayName ?? peerId ?? "Direct chat";
+    const peer = users.find((u) => u.id === activePeerId);
+    return peer?.displayName ?? activePeerId ?? "Direct chat";
   })();
 
   const activeSubtitle = activeConversation
@@ -176,9 +180,11 @@ export default function ChatPage() {
     activeConversation?.type === "GROUP"
       ? (activeConversation.title ?? "Group")
       : activeTitle || "?";
-  // Canonical avatar color key: conversation id (group or DM alike) — never a
-  // display name (REG-05 parity with mobile).
-  const headerAvatarKey = activeConversation?.id ?? "?";
+  // DIRECT avatars represent the peer user; GROUP avatars represent the room.
+  const headerAvatarKey =
+    activeConversation?.type === "DIRECT"
+      ? (activePeerId ?? activeConversation.id)
+      : (activeConversation?.id ?? "?");
 
   return (
     <div className="relative flex h-screen overflow-hidden bg-app">

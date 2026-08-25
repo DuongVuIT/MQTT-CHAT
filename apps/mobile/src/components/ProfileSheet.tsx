@@ -60,8 +60,11 @@ export function ProfileSheet({
         >
           <View style={styles.grabber} />
           <View style={styles.profileRow}>
-            <View style={[styles.avatar, { backgroundColor: avatar.bg }]}>
-              <Text style={styles.avatarText}>
+            <View
+              testID="profile-sheet-avatar"
+              style={[styles.avatar, { backgroundColor: avatar.bg }]}
+            >
+              <Text style={[styles.avatarText, { color: avatar.fg }]}>
                 {initialsFromDisplayName(displayName)}
               </Text>
             </View>

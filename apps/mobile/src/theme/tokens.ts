@@ -140,7 +140,8 @@ export const zIndex = {
 // @mqtt-chat/realtime-core. Web and mobile MUST hash the same key with the
 // same algorithm over the same palette, or the same user renders different
 // colors per platform (REG-05). Keys: userId for people, conversationId for
-// conversation avatars — never display names.
+// GROUP conversation avatars — never display names. DIRECT peer avatars use
+// the peer userId, just like every other presentation of that person.
 // ---------------------------------------------------------------------------
 
 /** White text on every 600-weight palette entry stays readable on both platforms. */

@@ -14,6 +14,7 @@ export function ScreenHeader({
   subtitle,
   avatar,
   avatarColor,
+  avatarTextColor,
   onBack,
   backLabel = 'Back',
   right,
@@ -24,6 +25,7 @@ export function ScreenHeader({
   /** Initials for the conversation avatar (omitted → no avatar). */
   avatar?: string;
   avatarColor?: string;
+  avatarTextColor?: string;
   /** Omit → no back control (root screens). */
   onBack?: () => void;
   backLabel?: string;
@@ -64,7 +66,12 @@ export function ScreenHeader({
               { backgroundColor: avatarColor ?? colors.surfaceHigh },
             ]}
           >
-            <Text style={styles.avatarText}>
+            <Text
+              style={[
+                styles.avatarText,
+                avatarTextColor ? { color: avatarTextColor } : undefined,
+              ]}
+            >
               {avatar.slice(0, 2).toUpperCase()}
             </Text>
           </View>

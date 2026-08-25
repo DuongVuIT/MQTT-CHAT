@@ -117,6 +117,9 @@ export function DetailsPanel({
       (memberFilter.trim() === "" ||
         u.displayName.toLowerCase().includes(memberFilter.trim().toLowerCase())),
   );
+  const peer = members.find((member) => member.userId !== identity?.userId);
+  const directDisplayName =
+    users.find((user) => user.id === peer?.userId)?.displayName ?? peer?.userId ?? "Direct chat";
 
   const addMember = async (userId: string): Promise<void> => {
     if (!conversation || addBusy) return;
@@ -168,21 +171,16 @@ export function DetailsPanel({
         {/* Identity block (§22/§33) */}
         <div className="flex flex-col items-center pb-4 text-center">
           <Avatar
-            name={conversation.type === "GROUP" ? (conversation.title ?? "Group") : "Direct"}
-            colorKey={conversation.id}
+            name={
+              conversation.type === "GROUP" ? (conversation.title ?? "Group") : directDisplayName
+            }
+            colorKey={
+              conversation.type === "GROUP" ? conversation.id : (peer?.userId ?? conversation.id)
+            }
             size="lg"
           />
           <p className="mt-2 max-w-full truncate text-sm font-semibold">
-            {conversation.type === "GROUP"
-              ? (conversation.title ?? "Group")
-              : (() => {
-                  const peer = members.find((m) => m.userId !== identity?.userId);
-                  return (
-                    users.find((u) => u.id === peer?.userId)?.displayName ??
-                    peer?.userId ??
-                    "Direct chat"
-                  );
-                })()}
+            {conversation.type === "GROUP" ? (conversation.title ?? "Group") : directDisplayName}
           </p>
           <p className="text-xs text-ink-3">
             {members.length} {members.length === 1 ? "member" : "members"}

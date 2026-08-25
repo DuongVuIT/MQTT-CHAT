@@ -5,10 +5,10 @@ export interface AvatarProps {
   /** Initials source — display name (never affects the color). */
   name: string;
   /**
-   * Stable identity the color derives from: userId for people, conversationId
-   * for groups. REQUIRED so web and mobile always render the same color for
-   * the same identity (REG-05 — web used to hash the display name with a
-   * different algorithm/palette than mobile).
+   * Stable identity the color derives from: userId for people (including DM
+   * peers), conversationId for groups. REQUIRED so web and mobile always
+   * render the same color for the same entity (REG-05 — web used to hash the
+   * display name with a different algorithm/palette than mobile).
    */
   colorKey: string;
   size?: "sm" | "md" | "lg";

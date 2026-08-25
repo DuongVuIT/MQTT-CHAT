@@ -9,7 +9,8 @@
  * (AGENTS §20: never infer identity from display names).
  *
  * Contract:
- *   colorKey = userId for humans/bots, conversationId for group avatars.
+ *   colorKey = userId for people/bots (including DIRECT peer avatars),
+ *   conversationId for GROUP avatars.
  *   displayName feeds initials ONLY — never the color.
  * Same key ⇒ same palette entry on web and mobile, forever.
  */
@@ -63,7 +64,7 @@ export function initialsFromDisplayName(displayName: string | null | undefined):
 }
 
 export interface UserPresentation {
-  /** Stable color key (userId / conversationId) the presentation derives from. */
+  /** Stable color key (userId or conversationId) the presentation derives from. */
   colorKey: string;
   /** Deterministic background hex — identical across clients. */
   colorHex: string;

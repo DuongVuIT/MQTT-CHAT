@@ -64,11 +64,6 @@ function conversationTitle(
   );
 }
 
-function initialsOf(name: string): string {
-  // Shared canonical initials rule — identical to web's Avatar (REG-05).
-  return initialsFromDisplayName(name);
-}
-
 /**
  * Canonical media policy — ONE source of truth in @mqtt-chat/mqtt-contracts
  * (repair-log #26). Never raw-compares picker MIME: iOS reports JPEG as
@@ -407,11 +402,18 @@ export function AppRoot() {
   }
 
   const peerId =
-    activeConv.members?.find(m => m.userId !== identity.userId)?.userId ?? '';
+    activeConv.members?.find(member => member.userId !== identity.userId)
+      ?.userId ?? '';
   const peerName =
-    users.find(u => u.id === peerId)?.displayName ??
+    users.find(user => user.id === peerId)?.displayName ??
     activeConv.title ??
     route.title;
+  const avatarInitials = initialsFromDisplayName(
+    route.isGroup ? (activeConv.title ?? route.title) : peerName,
+  );
+  const avatarColorKey = route.isGroup
+    ? activeConv.id
+    : peerId || activeConv.id;
 
   return (
     <View style={styles.root}>
@@ -419,7 +421,8 @@ export function AppRoot() {
         title={route.title}
         conversationId={route.conversationId}
         subtitle={route.subtitle ?? undefined}
-        peerInitials={initialsOf(peerName)}
+        avatarInitials={avatarInitials}
+        avatarColorKey={avatarColorKey}
         messages={session.messagesByConv[route.conversationId] ?? []}
         pending={session.pendingListFor(route.conversationId)}
         typingUsers={session.typingByConv[route.conversationId] ?? []}

@@ -373,9 +373,9 @@ const PendingRow = React.memo(function PendingRow({
 
 export function ChatScreen({
   title,
-  conversationId,
   subtitle,
-  peerInitials,
+  avatarInitials,
+  avatarColorKey,
   messages,
   pending,
   typingUsers,
@@ -396,11 +396,13 @@ export function ChatScreen({
   onOpenDetails,
 }: {
   title: string;
-  /** Stable conversation id — the canonical avatar color key (REG-05). */
+  /** Stable conversation id used by the messaging lifecycle. */
   conversationId: string;
   subtitle?: string;
-  /** Peer/group initials for the header avatar. */
-  peerInitials: string;
+  /** Peer initials for DIRECT; group initials for GROUP. */
+  avatarInitials: string;
+  /** Peer userId for DIRECT; conversationId for GROUP. */
+  avatarColorKey: string;
   messages: ApiMessage[];
   pending: PendingMessage[];
   typingUsers: string[];
@@ -630,9 +632,7 @@ export function ChatScreen({
   );
 
   const canSend = draft.trim().length > 0 || editing !== null;
-  // Canonical color key = stable conversation id, never the display title
-  // (REG-05 parity with web).
-  const avatar = avatarColorFor(conversationId);
+  const avatar = avatarColorFor(avatarColorKey);
 
   return (
     <KeyboardAvoidingView
@@ -642,8 +642,9 @@ export function ChatScreen({
       <ScreenHeader
         title={title}
         subtitle={subtitle}
-        avatar={peerInitials}
-        avatarColor={isGroup ? colors.surfaceHigh : avatar.bg}
+        avatar={avatarInitials}
+        avatarColor={avatar.bg}
+        avatarTextColor={avatar.fg}
         onBack={onBack}
         onPressTitle={onOpenDetails}
         right={

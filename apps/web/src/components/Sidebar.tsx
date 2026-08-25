@@ -286,7 +286,7 @@ export function Sidebar() {
               >
                 <Avatar
                   name={title}
-                  colorKey={c.id}
+                  colorKey={isGroup ? c.id : (otherMember?.userId ?? c.id)}
                   size="md"
                   online={isGroup ? undefined : online}
                 />
