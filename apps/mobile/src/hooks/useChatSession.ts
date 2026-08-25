@@ -1,27 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChatRealtimeClient,
   mergeMessageSnapshot,
   normalizeMessage,
   type ConnectionStatus,
   type RealtimeEvent,
-} from '@mqtt-chat/realtime-core';
-import { COMMAND_TOPICS } from '@mqtt-chat/mqtt-contracts';
+} from "@mqtt-chat/realtime-core";
+import { COMMAND_TOPICS } from "@mqtt-chat/mqtt-contracts";
 import {
   applyConversationEvent,
   applyMessageActivity,
   applyReadReceipt,
   applyReactionEvent,
   type ConversationEventTypeName,
-} from '../features/conversations/conversation-events';
-import {
-  api,
-  type ApiConversation,
-  type ApiMessage,
-  type ApiUser,
-} from '../lib/api';
-import { MQTT_WS_URL } from '../lib/config';
-import { MessageLifecycleStore } from '../features/messaging/message-lifecycle';
+} from "@app/features/conversations/conversation-events";
+import { api, type ApiConversation, type ApiMessage, type ApiUser } from "@app/lib/api";
+import { MessageLifecycleStore } from "@app/features/messaging/message-lifecycle";
+import { MQTT_WS_URL } from "@app/lib/config";
 
 // Typing throttle (#192, parity with web Composer): ≥1s between `started`
 // publishes per conversation; silence ⇒ deterministic auto-stop after 2s.
@@ -50,39 +45,27 @@ export interface Identity {
  * typing indicator and read receipts.
  */
 export function useChatSession(identity: Identity | null) {
-  const identityKey = identity
-    ? `${identity.userId}:${identity.deviceId}`
-    : null;
-  const [status, setStatus] = useState<ConnectionStatus>('offline');
+  const identityKey = identity ? `${identity.userId}:${identity.deviceId}` : null;
+  const [status, setStatus] = useState<ConnectionStatus>("offline");
   const [users, setUsers] = useState<ApiUser[]>([]);
   const [conversations, setConversations] = useState<ApiConversation[]>([]);
   // Bootstrap completion — the list screen distinguishes "still loading"
   // from a genuinely empty account (skeleton vs empty state, §66).
   const [conversationsLoaded, setConversationsLoaded] = useState(false);
-  const [messagesByConv, setMessagesByConv] = useState<
-    Record<string, ApiMessage[]>
-  >({});
+  const [messagesByConv, setMessagesByConv] = useState<Record<string, ApiMessage[]>>({});
   // Pending sends live in the lifecycle store; components read them via
   // pendingListFor(). This counter just signals "pending changed" so the
   // (single) consumer re-renders — the old per-conversation recount map
   // recomputed EVERY conversation's pending list on every event for a
   // consumer that never read it.
   const [pendingVersion, setPendingVersion] = useState(0);
-  const [typingByConv, setTypingByConv] = useState<Record<string, string[]>>(
-    {},
-  );
+  const [typingByConv, setTypingByConv] = useState<Record<string, string[]>>({});
   const [presence, setPresence] = useState<Record<string, boolean>>({});
-  const [hasMoreByConv, setHasMoreByConv] = useState<Record<string, boolean>>(
-    {},
-  );
-  const [loadingEarlierByConv, setLoadingEarlierByConv] = useState<
-    Record<string, boolean>
-  >({});
+  const [hasMoreByConv, setHasMoreByConv] = useState<Record<string, boolean>>({});
+  const [loadingEarlierByConv, setLoadingEarlierByConv] = useState<Record<string, boolean>>({});
   // Initial history fetch in flight per conversation — the chat screen shows
   // a skeleton instead of a false "No messages yet" (§66).
-  const [loadingHistoryByConv, setLoadingHistoryByConv] = useState<
-    Record<string, boolean>
-  >({});
+  const [loadingHistoryByConv, setLoadingHistoryByConv] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   // REST bootstrap starts only after MQTT subscriptions have SUBACKed.
   const [realtimeReadyKey, setRealtimeReadyKey] = useState<string | null>(null);
@@ -91,15 +74,11 @@ export function useChatSession(identity: Identity | null) {
   // Typing throttle state (#192): per-conversation last `started` publish and
   // the pending auto-stop timer.
   const typingLastSentRef = useRef(new Map<string, number>());
-  const typingStopTimersRef = useRef(
-    new Map<string, ReturnType<typeof setTimeout>>(),
-  );
+  const typingStopTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   // Incoming typing receipts: conversationId → (userId → last `started` ms).
   const typingSeenRef = useRef(new Map<string, Map<string, number>>());
   // Presence grace: userId → timer that will apply the offline flip.
-  const presenceGraceTimersRef = useRef(
-    new Map<string, ReturnType<typeof setTimeout>>(),
-  );
+  const presenceGraceTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const lifecycleRef = useRef<MessageLifecycleStore | null>(null);
   const bootstrapReadyRef = useRef(false);
   const bufferedEventsRef = useRef<RealtimeEvent[]>([]);
@@ -125,7 +104,7 @@ export function useChatSession(identity: Identity | null) {
     messagesByConvRef.current = messagesByConv;
   }, [messagesByConv]);
 
-  const bumpPending = useCallback(() => setPendingVersion(v => v + 1), []);
+  const bumpPending = useCallback(() => setPendingVersion((v) => v + 1), []);
 
   // ---- Identity boundary (REG-04) -----------------------------------------
   // Switching identity must not inherit ANY of the previous user's cached
@@ -170,7 +149,7 @@ export function useChatSession(identity: Identity | null) {
       const seen = lastVisibleReadRef.current;
       if ((seen.get(conversationId) ?? 0) >= sequence) return;
       seen.set(conversationId, sequence);
-      setConversations(prev =>
+      setConversations((prev) =>
         applyReadReceipt(prev, {
           conversationId,
           userId: identity.userId,
@@ -187,7 +166,7 @@ export function useChatSession(identity: Identity | null) {
         // retryable on the next view/reconnect instead of being silently
         // considered published forever.
         if (seen.get(conversationId) === sequence) seen.delete(conversationId);
-        setError('Read receipt could not be synchronized');
+        setError("Read receipt could not be synchronized");
       });
     },
     [identity],
@@ -223,9 +202,7 @@ export function useChatSession(identity: Identity | null) {
         clearTimeout(pending);
         timers.delete(userId);
       }
-      setPresence(prev =>
-        prev[userId] === true ? prev : { ...prev, [userId]: true },
-      );
+      setPresence((prev) => (prev[userId] === true ? prev : { ...prev, [userId]: true }));
       return;
     }
     // Offline: hold the flip for the grace window — a reconnect inside it
@@ -235,9 +212,7 @@ export function useChatSession(identity: Identity | null) {
       userId,
       setTimeout(() => {
         timers.delete(userId);
-        setPresence(prev =>
-          prev[userId] === false ? prev : { ...prev, [userId]: false },
-        );
+        setPresence((prev) => (prev[userId] === false ? prev : { ...prev, [userId]: false }));
       }, PRESENCE_GRACE_MS),
     );
   }, []);
@@ -272,19 +247,13 @@ export function useChatSession(identity: Identity | null) {
         setUsers(us);
         setConversations(convs);
         setConversationsLoaded(true);
-        const ids = [
-          ...new Set(convs.flatMap(c => (c.members ?? []).map(m => m.userId))),
-        ];
+        const ids = [...new Set(convs.flatMap((c) => (c.members ?? []).map((m) => m.userId)))];
         if (ids.length > 0) {
           const snap = await api.getPresence(ids);
           if (!cancelled) {
             // Server-authoritative: absent users stay UNKNOWN (undefined),
             // never rendered as offline.
-            setPresence(
-              Object.fromEntries(
-                Object.entries(snap).map(([k, v]) => [k, v.online]),
-              ),
-            );
+            setPresence(Object.fromEntries(Object.entries(snap).map(([k, v]) => [k, v.online])));
           }
         }
         if (cancelled) return;
@@ -293,8 +262,7 @@ export function useChatSession(identity: Identity | null) {
           eventHandlerRef.current?.(event);
         }
       } catch (e) {
-        if (!cancelled)
-          setError(e instanceof Error ? e.message : 'bootstrap failed');
+        if (!cancelled) setError(e instanceof Error ? e.message : "bootstrap failed");
       }
     })();
     return () => {
@@ -307,11 +275,11 @@ export function useChatSession(identity: Identity | null) {
     if (!identity || !identityKey) return;
     let cancelled = false;
     const store = new MessageLifecycleStore(
-      async p => {
+      async (p) => {
         await clientRef.current?.sendMessage({
           conversationId: p.conversationId,
           clientMessageId: p.clientMessageId,
-          type: p.type ?? 'TEXT',
+          type: p.type ?? "TEXT",
           content: p.content,
           replyToId: p.replyToId,
           metadata: p.metadata ?? null,
@@ -320,7 +288,7 @@ export function useChatSession(identity: Identity | null) {
       10_000,
       // Connection gate: while MQTT is down, sends are QUEUED (shown as
       // sending) and flushed on reconnect — never an uncaught rejection.
-      () => clientRef.current?.status === 'connected',
+      () => clientRef.current?.status === "connected",
     );
     lifecycleRef.current = store;
 
@@ -333,12 +301,12 @@ export function useChatSession(identity: Identity | null) {
         // ---- Conversation discovery / membership (Web→Mobile realtime) ----
         // Historical P0: these cases were MISSING — groups created on Web
         // only appeared on Mobile after an app reload.
-        case 'conversation.created':
-        case 'conversation.updated':
-        case 'conversation.deleted':
-        case 'conversation.member-joined':
-        case 'conversation.member-left': {
-          setConversations(prev =>
+        case "conversation.created":
+        case "conversation.updated":
+        case "conversation.deleted":
+        case "conversation.member-joined":
+        case "conversation.member-left": {
+          setConversations((prev) =>
             applyConversationEvent(
               prev,
               ev.eventType as ConversationEventTypeName,
@@ -348,30 +316,25 @@ export function useChatSession(identity: Identity | null) {
           );
           break;
         }
-        case 'message.created': {
+        case "message.created": {
           // Canonical normalization at the boundary — guarantees the UI
           // message invariants (reactions array, null-safe dates, senderName).
           // NEVER cast raw event data to the UI model.
           const m = normalizeMessage(data);
           if (!m.id || !m.conversationId) break; // malformed — ignore
           store.reconcile(m.clientMessageId, m);
-          setMessagesByConv(prev => {
+          setMessagesByConv((prev) => {
             const list = prev[m.conversationId] ?? [];
-            if (list.some(x => x.id === m.id)) return prev; // dedupe QoS1
+            if (list.some((x) => x.id === m.id)) return prev; // dedupe QoS1
             return {
               ...prev,
-              [m.conversationId]: [...list, m].sort(
-                (a, b) => a.sequence - b.sequence,
-              ),
+              [m.conversationId]: [...list, m].sort((a, b) => a.sequence - b.sequence),
             };
           });
           // Conversation list reacts to new messages in realtime: summary +
           // ordering update with NO reload.
-          const preview =
-            m.type === 'TEXT'
-              ? m.content.slice(0, 120)
-              : `[${m.type.toLowerCase()}]`;
-          setConversations(prev =>
+          const preview = m.type === "TEXT" ? m.content.slice(0, 120) : `[${m.type.toLowerCase()}]`;
+          setConversations((prev) =>
             applyMessageActivity(prev, {
               conversationId: m.conversationId,
               sequence: m.sequence,
@@ -382,7 +345,7 @@ export function useChatSession(identity: Identity | null) {
           bumpPending();
           break;
         }
-        case 'message.edited': {
+        case "message.edited": {
           const { messageId, content } = data as {
             messageId: string;
             content: string;
@@ -390,13 +353,11 @@ export function useChatSession(identity: Identity | null) {
           // PERF (§48): scope to the event's conversation when known — an
           // edit touches ONE message, never every cached transcript.
           const targetCid =
-            typeof data['conversationId'] === 'string'
-              ? data['conversationId']
-              : '';
-          setMessagesByConv(prev => {
+            typeof data["conversationId"] === "string" ? data["conversationId"] : "";
+          setMessagesByConv((prev) => {
             const editList = (list: ApiMessage[]): ApiMessage[] | null => {
               let changed = false;
-              const next = list.map(m => {
+              const next = list.map((m) => {
                 if (m.id !== messageId) return m;
                 changed = true;
                 return { ...m, content, editedAt: new Date().toISOString() };
@@ -420,16 +381,14 @@ export function useChatSession(identity: Identity | null) {
           });
           break;
         }
-        case 'message.deleted': {
+        case "message.deleted": {
           const { messageId } = data as { messageId: string };
           const targetCid =
-            typeof data['conversationId'] === 'string'
-              ? data['conversationId']
-              : '';
-          setMessagesByConv(prev => {
+            typeof data["conversationId"] === "string" ? data["conversationId"] : "";
+          setMessagesByConv((prev) => {
             const deleteIn = (list: ApiMessage[]): ApiMessage[] | null => {
               let changed = false;
-              const next = list.map(m => {
+              const next = list.map((m) => {
                 if (m.id !== messageId) return m;
                 changed = true;
                 return { ...m, deletedAt: new Date().toISOString() };
@@ -453,47 +412,41 @@ export function useChatSession(identity: Identity | null) {
           });
           break;
         }
-        case 'message.rejected': {
+        case "message.rejected": {
           // Authority rejected the send — fail the pending entry NOW
           // (deterministic, repair-log #27), never wait out the timeout.
           const rejectedCmid =
-            typeof data['clientMessageId'] === 'string'
-              ? data['clientMessageId']
-              : '';
+            typeof data["clientMessageId"] === "string" ? data["clientMessageId"] : "";
           if (rejectedCmid) {
             lifecycleRef.current?.markFailed(rejectedCmid);
             bumpPending();
           }
           break;
         }
-        case 'reaction.added':
-        case 'reaction.removed': {
+        case "reaction.added":
+        case "reaction.removed": {
           // Canonical reactions from ANY client (web included) land here in
           // realtime. Pure reducer — authoritative + QoS1-idempotent.
           // PERF: scope to the event's conversation when it is present and
           // cached; a no-op reducer result keeps the SAME references so
           // nothing re-renders (§48: reaction on X updates X's row only).
           const targetCid =
-            typeof data['conversationId'] === 'string'
-              ? data['conversationId']
-              : '';
-          setMessagesByConv(prev => {
+            typeof data["conversationId"] === "string" ? data["conversationId"] : "";
+          setMessagesByConv((prev) => {
             if (targetCid && prev[targetCid]) {
               const next = applyReactionEvent(
                 prev[targetCid],
-                ev.eventType as 'reaction.added' | 'reaction.removed',
+                ev.eventType as "reaction.added" | "reaction.removed",
                 data,
               );
-              return next === prev[targetCid]
-                ? prev
-                : { ...prev, [targetCid]: next };
+              return next === prev[targetCid] ? prev : { ...prev, [targetCid]: next };
             }
             const out: typeof prev = {};
             let same = true;
             for (const [cid, list] of Object.entries(prev)) {
               out[cid] = applyReactionEvent(
                 list,
-                ev.eventType as 'reaction.added' | 'reaction.removed',
+                ev.eventType as "reaction.added" | "reaction.removed",
                 data,
               );
               if (out[cid] !== list) same = false;
@@ -502,19 +455,16 @@ export function useChatSession(identity: Identity | null) {
           });
           break;
         }
-        case 'receipt.read': {
+        case "receipt.read": {
           // Canonical read receipts from ANY device of ANY member (the
           // worker fans the event to every member incl. the reader, so this
           // user's OTHER devices converge too — REG-02). Pure reducer with
           // the shared monotonic merge; stale/duplicates are no-ops.
-          const rid =
-            typeof data['conversationId'] === 'string'
-              ? data['conversationId']
-              : '';
-          const ruid = typeof data['userId'] === 'string' ? data['userId'] : '';
-          const rseq = Number(data['lastReadSequence']);
+          const rid = typeof data["conversationId"] === "string" ? data["conversationId"] : "";
+          const ruid = typeof data["userId"] === "string" ? data["userId"] : "";
+          const rseq = Number(data["lastReadSequence"]);
           if (!rid || !ruid) break;
-          setConversations(prev =>
+          setConversations((prev) =>
             applyReadReceipt(prev, {
               conversationId: rid,
               userId: ruid,
@@ -523,39 +473,39 @@ export function useChatSession(identity: Identity | null) {
           );
           break;
         }
-        case 'typing.started':
-        case 'typing.stopped': {
+        case "typing.started":
+        case "typing.stopped": {
           const { conversationId, userId } = data as {
             conversationId: string;
             userId: string;
           };
           if (userId === selfUserId) break; // self-echo (shared topic) is noise
-          if (ev.eventType === 'typing.started') {
+          if (ev.eventType === "typing.started") {
             const seen = typingSeenRef.current.get(conversationId) ?? new Map();
             seen.set(userId, Date.now());
             typingSeenRef.current.set(conversationId, seen);
-            setTypingByConv(prev => {
+            setTypingByConv((prev) => {
               const list = prev[conversationId] ?? [];
               if (list.includes(userId)) return prev;
               return { ...prev, [conversationId]: [...list, userId].sort() };
             });
           } else {
             typingSeenRef.current.get(conversationId)?.delete(userId);
-            setTypingByConv(prev => {
+            setTypingByConv((prev) => {
               const list = prev[conversationId] ?? [];
               if (!list.includes(userId)) return prev;
               return {
                 ...prev,
-                [conversationId]: list.filter(u => u !== userId),
+                [conversationId]: list.filter((u) => u !== userId),
               };
             });
           }
           break;
         }
-        case 'presence.online':
-        case 'presence.offline': {
+        case "presence.online":
+        case "presence.offline": {
           const { userId } = data as { userId: string };
-          applyPresence(userId, ev.eventType === 'presence.online');
+          applyPresence(userId, ev.eventType === "presence.online");
           break;
         }
         default:
@@ -576,7 +526,7 @@ export function useChatSession(identity: Identity | null) {
           requestId:
             globalThis.crypto?.randomUUID?.() ??
             `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          commandType: 'presence.set',
+          commandType: "presence.set",
           version: 1,
           timestamp: new Date().toISOString(),
           actor: { userId: identity.userId, deviceId: identity.deviceId },
@@ -584,8 +534,8 @@ export function useChatSession(identity: Identity | null) {
         }),
         qos: 1,
       },
-      onStatus: nextStatus => {
-        if (nextStatus === 'reconnecting' || nextStatus === 'offline') {
+      onStatus: (nextStatus) => {
+        if (nextStatus === "reconnecting" || nextStatus === "offline") {
           bootstrapReadyRef.current = false;
         }
         setStatus(nextStatus);
@@ -597,7 +547,7 @@ export function useChatSession(identity: Identity | null) {
           /* transient — next reconnect retries */
         });
       },
-      onEvent: event => {
+      onEvent: (event) => {
         if (!bootstrapReadyRef.current) bufferedEventsRef.current.push(event);
         else handleEvent(event);
       },
@@ -609,8 +559,7 @@ export function useChatSession(identity: Identity | null) {
         if (!cancelled) setRealtimeReadyKey(identityKey);
       })
       .catch((e: unknown) => {
-        if (!cancelled)
-          setError(e instanceof Error ? e.message : 'MQTT connect failed');
+        if (!cancelled) setError(e instanceof Error ? e.message : "MQTT connect failed");
       });
 
     return () => {
@@ -634,7 +583,7 @@ export function useChatSession(identity: Identity | null) {
       // Only the FIRST open of a conversation shows the loading skeleton;
       // re-opens keep cached content on screen while refreshing.
       let showSkeleton = false;
-      setLoadingHistoryByConv(prev => {
+      setLoadingHistoryByConv((prev) => {
         if (prev[conversationId]) return prev;
         showSkeleton = true;
         return { ...prev, [conversationId]: true };
@@ -642,7 +591,7 @@ export function useChatSession(identity: Identity | null) {
       try {
         const res = await api.getMessages(conversationId);
         lifecycleRef.current?.applyHistory(res.messages);
-        setMessagesByConv(prev => {
+        setMessagesByConv((prev) => {
           const live = prev[conversationId] ?? [];
           // Canonical events received after the request started are newer
           // than the snapshot and win by id; unique live rows are retained.
@@ -651,7 +600,7 @@ export function useChatSession(identity: Identity | null) {
             [conversationId]: mergeMessageSnapshot(res.messages, live),
           };
         });
-        setHasMoreByConv(prev => ({
+        setHasMoreByConv((prev) => ({
           ...prev,
           [conversationId]: res.hasMore,
         }));
@@ -661,10 +610,10 @@ export function useChatSession(identity: Identity | null) {
           markVisibleRead(conversationId, lastSeq);
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'history load failed');
+        setError(e instanceof Error ? e.message : "history load failed");
       } finally {
         if (showSkeleton) {
-          setLoadingHistoryByConv(prev => ({
+          setLoadingHistoryByConv((prev) => ({
             ...prev,
             [conversationId]: false,
           }));
@@ -681,41 +630,33 @@ export function useChatSession(identity: Identity | null) {
       const oldest = existing[0];
       if (!oldest || !hasMoreByConv[conversationId]) return;
       if (loadingEarlierByConv[conversationId]) return;
-      setLoadingEarlierByConv(prev => ({ ...prev, [conversationId]: true }));
+      setLoadingEarlierByConv((prev) => ({ ...prev, [conversationId]: true }));
       try {
         const res = await api.getMessages(conversationId, {
           before: oldest.sequence,
         });
         lifecycleRef.current?.applyHistory(res.messages);
-        setMessagesByConv(prev => {
+        setMessagesByConv((prev) => {
           const list = prev[conversationId] ?? [];
-          const known = new Set(list.map(m => m.id));
-          const merged = [
-            ...res.messages.filter(m => !known.has(m.id)),
-            ...list,
-          ];
+          const known = new Set(list.map((m) => m.id));
+          const merged = [...res.messages.filter((m) => !known.has(m.id)), ...list];
           merged.sort((a, b) => a.sequence - b.sequence);
           return { ...prev, [conversationId]: merged };
         });
-        setHasMoreByConv(prev => ({ ...prev, [conversationId]: res.hasMore }));
+        setHasMoreByConv((prev) => ({ ...prev, [conversationId]: res.hasMore }));
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'history load failed');
+        setError(e instanceof Error ? e.message : "history load failed");
       } finally {
-        setLoadingEarlierByConv(prev => ({ ...prev, [conversationId]: false }));
+        setLoadingEarlierByConv((prev) => ({ ...prev, [conversationId]: false }));
       }
     },
     [messagesByConv, hasMoreByConv, loadingEarlierByConv],
   );
 
   const sendMessage = useCallback(
-    async (
-      conversationId: string,
-      content: string,
-      replyToId: string | null = null,
-    ) => {
+    async (conversationId: string, content: string, replyToId: string | null = null) => {
       if (!identity || !lifecycleRef.current) return;
-      const clientMessageId =
-        globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+      const clientMessageId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
       await lifecycleRef.current.send({
         clientMessageId,
         conversationId,
@@ -755,30 +696,18 @@ export function useChatSession(identity: Identity | null) {
 
   const editMessage = useCallback(
     async (conversationId: string, messageId: string, content: string) => {
-      await clientRef.current
-        ?.editMessage({ messageId, conversationId, content })
-        .catch(() => {});
+      await clientRef.current?.editMessage({ messageId, conversationId, content }).catch(() => {});
     },
     [],
   );
 
-  const deleteMessage = useCallback(
-    async (conversationId: string, messageId: string) => {
-      await clientRef.current
-        ?.deleteMessage({ messageId, conversationId })
-        .catch(() => {});
-    },
-    [],
-  );
+  const deleteMessage = useCallback(async (conversationId: string, messageId: string) => {
+    await clientRef.current?.deleteMessage({ messageId, conversationId }).catch(() => {});
+  }, []);
 
   /** Canonical add/remove reaction — idempotent server-side. */
   const toggleReaction = useCallback(
-    (
-      conversationId: string,
-      messageId: string,
-      emoji: string,
-      remove: boolean,
-    ) => {
+    (conversationId: string, messageId: string, emoji: string, remove: boolean) => {
       const command = remove
         ? clientRef.current?.removeReaction({
             messageId,
@@ -792,16 +721,13 @@ export function useChatSession(identity: Identity | null) {
   );
 
   /** Optimistic upsert after REST creation (realtime event dedupes by id). */
-  const upsertLocalConversation = useCallback(
-    (conversation: ApiConversation) => {
-      setConversations(prev =>
-        prev.some(c => c.id === conversation.id)
-          ? prev.map(c => (c.id === conversation.id ? conversation : c))
-          : [conversation, ...prev],
-      );
-    },
-    [],
-  );
+  const upsertLocalConversation = useCallback((conversation: ApiConversation) => {
+    setConversations((prev) =>
+      prev.some((c) => c.id === conversation.id)
+        ? prev.map((c) => (c.id === conversation.id ? conversation : c))
+        : [conversation, ...prev],
+    );
+  }, []);
 
   /** Safety-net refetch (mutations also reconcile via canonical events). */
   const refreshConversations = useCallback(async () => {
@@ -817,55 +743,51 @@ export function useChatSession(identity: Identity | null) {
     [bumpPending],
   );
 
-  const sendTyping = useCallback(
-    (conversationId: string, isTyping: boolean) => {
-      // Ephemeral signal — safe to drop when disconnected. THROTTLED (#192,
-      // parity with web): every keystroke used to publish its own QoS1
-      // command with no auto-stop, spamming the broker/worker. Now at most
-      // one `started` per second per conversation, a deterministic `stopped`
-      // after 2s of silence, and immediate stop on submit/blur.
-      const client = clientRef.current;
-      if (!client) return;
-      const timers = typingStopTimersRef.current;
-      const lastSentAt = typingLastSentRef.current;
+  const sendTyping = useCallback((conversationId: string, isTyping: boolean) => {
+    // Ephemeral signal — safe to drop when disconnected. THROTTLED (#192,
+    // parity with web): every keystroke used to publish its own QoS1
+    // command with no auto-stop, spamming the broker/worker. Now at most
+    // one `started` per second per conversation, a deterministic `stopped`
+    // after 2s of silence, and immediate stop on submit/blur.
+    const client = clientRef.current;
+    if (!client) return;
+    const timers = typingStopTimersRef.current;
+    const lastSentAt = typingLastSentRef.current;
 
-      const armAutoStop = () => {
-        const existing = timers.get(conversationId);
-        if (existing) clearTimeout(existing);
-        timers.set(
-          conversationId,
-          setTimeout(() => {
-            timers.delete(conversationId);
-            lastSentAt.delete(conversationId);
-            clientRef.current?.setTyping(conversationId, false).catch(() => {});
-          }, TYPING_AUTOSTOP_MS),
-        );
-      };
+    const armAutoStop = () => {
+      const existing = timers.get(conversationId);
+      if (existing) clearTimeout(existing);
+      timers.set(
+        conversationId,
+        setTimeout(() => {
+          timers.delete(conversationId);
+          lastSentAt.delete(conversationId);
+          clientRef.current?.setTyping(conversationId, false).catch(() => {});
+        }, TYPING_AUTOSTOP_MS),
+      );
+    };
 
-      if (!isTyping) {
-        const pending = timers.get(conversationId);
-        if (pending) clearTimeout(pending);
-        timers.delete(conversationId);
-        if (!lastSentAt.has(conversationId)) return;
-        lastSentAt.delete(conversationId);
-        client.setTyping(conversationId, false).catch(() => {});
-        return;
-      }
+    if (!isTyping) {
+      const pending = timers.get(conversationId);
+      if (pending) clearTimeout(pending);
+      timers.delete(conversationId);
+      if (!lastSentAt.has(conversationId)) return;
+      lastSentAt.delete(conversationId);
+      client.setTyping(conversationId, false).catch(() => {});
+      return;
+    }
 
-      const now = Date.now();
-      const last = lastSentAt.get(conversationId) ?? 0;
-      if (now - last >= TYPING_THROTTLE_MS) {
-        lastSentAt.set(conversationId, now);
-        client.setTyping(conversationId, true).catch(() => {});
-      }
-      armAutoStop();
-    },
-    [],
-  );
+    const now = Date.now();
+    const last = lastSentAt.get(conversationId) ?? 0;
+    if (now - last >= TYPING_THROTTLE_MS) {
+      lastSentAt.set(conversationId, now);
+      client.setTyping(conversationId, true).catch(() => {});
+    }
+    armAutoStop();
+  }, []);
 
   const pendingListFor = useCallback(
-    (conversationId: string) =>
-      lifecycleRef.current?.getPending(conversationId) ?? [],
+    (conversationId: string) => lifecycleRef.current?.getPending(conversationId) ?? [],
     [],
   );
 
@@ -876,15 +798,11 @@ export function useChatSession(identity: Identity | null) {
   // conversation with a SEQ-SCOPED fetch (?after=<known watermark>) merged
   // by id — a full latest-50 REPLACE used to destroy paginated history and
   // drop messages that arrived mid-refetch (audit P2).
-  const prevStatusRef = useRef<ConnectionStatus>('offline');
+  const prevStatusRef = useRef<ConnectionStatus>("offline");
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
-    if (
-      status !== 'connected' ||
-      (prev !== 'reconnecting' && prev !== 'offline')
-    )
-      return;
+    if (status !== "connected" || (prev !== "reconnecting" && prev !== "offline")) return;
     // Flush messages queued while offline (bounded by the lifecycle timeout;
     // publish failures inside flush are caught and marked failed).
     void lifecycleRef.current?.flushQueued().catch(() => {
@@ -909,14 +827,12 @@ export function useChatSession(identity: Identity | null) {
             );
             if (cancelled) return;
             lifecycleRef.current?.applyHistory(res.messages);
-            setMessagesByConv(prevMap => {
+            setMessagesByConv((prevMap) => {
               const list = prevMap[cid] ?? [];
-              const known = new Set(list.map(m => m.id));
-              const fresh = res.messages.filter(m => !known.has(m.id));
+              const known = new Set(list.map((m) => m.id));
+              const fresh = res.messages.filter((m) => !known.has(m.id));
               if (fresh.length === 0) return prevMap;
-              const merged = [...list, ...fresh].sort(
-                (a, b) => a.sequence - b.sequence,
-              );
+              const merged = [...list, ...fresh].sort((a, b) => a.sequence - b.sequence);
               return { ...prevMap, [cid]: merged };
             });
           } catch {

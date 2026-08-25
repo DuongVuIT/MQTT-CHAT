@@ -1,22 +1,10 @@
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
-import type { ApiUser } from '../lib/api';
-import {
-  avatarColorFor,
-  colors,
-  radius,
-  spacing,
-  typography,
-} from '../theme/tokens';
+import React from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { initialsFromDisplayName } from "@mqtt-chat/realtime-core";
+import type { ApiUser } from "@app/lib/api";
+import { avatarColorFor, colors, radius, spacing, typography } from "@app/theme/tokens";
 
-/**
- * Identity picker — safe-area correct (nothing under the notch/Dynamic
- * Island), product-styled. This demo has no auth: picking an identity IS the
- * sign-in. Test-fixture ids (fx…/e2e-…) are filtered so automated users
- * never show up as pickable demo identities.
- */
 export function IdentityPickerScreen({
   users,
   onPick,
@@ -25,56 +13,48 @@ export function IdentityPickerScreen({
   onPick: (userId: string) => void;
 }) {
   const insets = useSafeAreaInsets();
-  const visible = users.filter(
-    u => !u.id.startsWith('fx') && !u.id.startsWith('e2e-'),
+  const visibleUsers = users.filter(
+    (user) => !user.id.startsWith("fx") && !user.id.startsWith("e2e-"),
   );
 
   return (
     <View
-      style={[
-        styles.container,
-        { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 24 },
-      ]}
+      style={[styles.container, { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}
     >
-      <View style={styles.brandRow}>
-        <View style={styles.brandMark}>
-          <Text style={styles.brandMarkText}>💬</Text>
-        </View>
+      <View style={styles.ambientTop} />
+      <View style={styles.brandMark}>
+        <Text style={styles.brandMarkText}>MQ</Text>
       </View>
+      <Text style={styles.eyebrow}>REALTIME WORKSPACE</Text>
       <Text style={styles.title}>MQTT Chat</Text>
-      <Text style={styles.subtitle}>Choose who you are to start chatting</Text>
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-      >
-        {visible.map(u => {
-          const c = avatarColorFor(u.id);
+      <Text style={styles.subtitle}>Choose an identity to enter the workspace.</Text>
+      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+        {visibleUsers.map((user) => {
+          const avatarColors = avatarColorFor(user.id);
           return (
             <Pressable
-              key={u.id}
-              style={({ pressed }) => [
-                styles.item,
-                pressed && styles.itemPressed,
-              ]}
-              onPress={() => onPick(u.id)}
+              key={user.id}
+              style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
+              onPress={() => onPick(user.id)}
               accessibilityRole="button"
-              accessibilityLabel={`Continue as ${u.displayName}`}
+              accessibilityLabel={`Continue as ${user.displayName}`}
             >
-              <View style={[styles.avatar, { backgroundColor: c.bg }]}>
-                <Text style={styles.avatarText}>
-                  {initialsFromDisplayName(u.displayName)}
+              <View style={[styles.avatar, { backgroundColor: avatarColors.bg }]}>
+                <Text style={[styles.avatarText, { color: avatarColors.fg }]}>
+                  {initialsFromDisplayName(user.displayName)}
                 </Text>
               </View>
-              <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
-                {u.displayName}
-              </Text>
+              <View style={styles.identityText}>
+                <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
+                  {user.displayName}
+                </Text>
+                <Text style={styles.identityHint}>Open workspace</Text>
+              </View>
               <Text style={styles.chevron}>›</Text>
             </Pressable>
           );
         })}
-        {visible.length === 0 && (
-          <Text style={styles.empty}>No users available</Text>
-        )}
+        {visibleUsers.length === 0 && <Text style={styles.empty}>No users available</Text>}
       </ScrollView>
     </View>
   );
@@ -83,50 +63,74 @@ export function IdentityPickerScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.background,
-    gap: spacing.sm + 2,
+    paddingHorizontal: spacing.xl,
   },
-  brandRow: { marginBottom: spacing.xs },
-  brandMark: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.xl,
+  ambientTop: {
+    position: "absolute",
+    top: -120,
+    width: 320,
+    height: 240,
+    borderRadius: radius.full,
     backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+    opacity: 0.7,
   },
-  brandMarkText: { fontSize: 30 },
+  brandMark: {
+    width: 60,
+    height: 60,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.lg,
+  },
+  brandMarkText: {
+    color: colors.onPrimary,
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: -0.5,
+  },
+  eyebrow: {
+    ...typography.meta,
+    color: colors.primaryStrong,
+    letterSpacing: 1.8,
+    marginBottom: spacing.sm,
+  },
   title: { ...typography.display, color: colors.textPrimary },
   subtitle: {
     ...typography.subtitle,
     color: colors.textSecondary,
-    marginBottom: spacing.lg,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xxl,
+    textAlign: "center",
   },
-  list: { alignItems: 'center', gap: spacing.md },
+  list: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
   item: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceRaised,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     paddingHorizontal: spacing.lg,
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
     borderRadius: radius.lg,
-    width: 300,
-    minHeight: 64,
+    width: "100%",
+    minHeight: 72,
   },
-  itemPressed: { backgroundColor: colors.surfaceHigh },
+  itemPressed: { backgroundColor: colors.surfaceHigh, transform: [{ scale: 0.985 }] },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  avatarText: { color: colors.textPrimary, fontWeight: '700', fontSize: 16 },
-  name: { ...typography.title, color: colors.textPrimary, flex: 1 },
-  chevron: { color: colors.textMuted, fontSize: 18, fontWeight: '600' },
+  avatarText: { fontWeight: "700", fontSize: 16 },
+  identityText: { flex: 1 },
+  name: { ...typography.title, color: colors.textPrimary },
+  identityHint: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  chevron: { color: colors.primaryStrong, fontSize: 22, fontWeight: "600" },
   empty: { color: colors.textMuted, marginTop: 24 },
 });

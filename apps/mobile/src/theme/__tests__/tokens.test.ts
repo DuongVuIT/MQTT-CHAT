@@ -1,9 +1,9 @@
-import { avatarColorFor } from '../tokens';
+import { avatarColorFor } from "@app/theme/tokens";
 import {
   avatarColorHex,
   avatarPaletteIndex,
   initialsFromDisplayName,
-} from '@mqtt-chat/realtime-core';
+} from "@mqtt-chat/realtime-core";
 
 /**
  * REG-05 (2026-08-25): mobile used to hash display names with djb2 over its
@@ -12,25 +12,25 @@ import {
  * stay a thin delegation onto the shared canonical algorithm.
  */
 
-describe('mobile avatar parity with the canonical presentation', () => {
-  const keys = ['duong', 'alice', 'bob', 'john', 'chat-bot', 'conv-abc123', ''];
+describe("mobile avatar parity with the canonical presentation", () => {
+  const keys = ["duong", "alice", "bob", "john", "chat-bot", "conv-abc123", ""];
 
-  it.each(keys)('adapter bg equals shared avatarColorHex for %s', key => {
+  it.each(keys)("adapter bg equals shared avatarColorHex for %s", (key) => {
     expect(avatarColorFor(key).bg).toBe(avatarColorHex(key));
   });
 
-  it('stays inside the shared palette bounds', () => {
+  it("stays inside the shared palette bounds", () => {
     for (const key of keys) {
       expect(avatarPaletteIndex(key)).toBeGreaterThanOrEqual(0);
     }
   });
 
-  it('is deterministic across calls (no per-render drift)', () => {
-    expect(avatarColorFor('duong')).toEqual(avatarColorFor('duong'));
+  it("is deterministic across calls (no per-render drift)", () => {
+    expect(avatarColorFor("duong")).toEqual(avatarColorFor("duong"));
   });
 
-  it('uses the shared initials rule', () => {
-    expect(initialsFromDisplayName('Duong Van')).toBe('DV');
-    expect(initialsFromDisplayName('Alice')).toBe('A');
+  it("uses the shared initials rule", () => {
+    expect(initialsFromDisplayName("Duong Van")).toBe("DV");
+    expect(initialsFromDisplayName("Alice")).toBe("A");
   });
 });

@@ -5,9 +5,9 @@
  * Pure TypeScript — unit-testable with jest, no React/RN imports.
  */
 
-import type { ApiMessage } from '../../lib/api';
+import type { ApiMessage } from "@app/lib/api";
 
-export type PendingStatus = 'queued' | 'pending' | 'failed';
+export type PendingStatus = "queued" | "pending" | "failed";
 
 export interface PendingMessage {
   clientMessageId: string;
@@ -37,14 +37,14 @@ export class MessageLifecycleStore {
 
   getPending(conversationId: string): PendingMessage[] {
     return [...this.pending.values()].filter(
-      p => p.conversationId === conversationId,
+      (pendingMessage) => pendingMessage.conversationId === conversationId,
     );
   }
 
   getMessages(conversationId: string): ApiMessage[] {
     return [...this.messages.values()]
-      .filter(m => m.conversationId === conversationId)
-      .sort((a, b) => a.sequence - b.sequence);
+      .filter((message) => message.conversationId === conversationId)
+      .sort((firstMessage, secondMessage) => firstMessage.sequence - secondMessage.sequence);
   }
 
   /**
@@ -53,11 +53,11 @@ export class MessageLifecycleStore {
    * bounded by the same reconciliation timeout so a message can never stay
    * queued forever; flushQueued() publishes it on reconnect.
    */
-  async send(input: Omit<PendingMessage, 'status'>): Promise<void> {
-    const status: PendingStatus = this.isConnected() ? 'pending' : 'queued';
+  async send(input: Omit<PendingMessage, "status">): Promise<void> {
+    const status: PendingStatus = this.isConnected() ? "pending" : "queued";
     const pending: PendingMessage = { ...input, status };
     this.pending.set(input.clientMessageId, pending);
-    if (status === 'queued') {
+    if (status === "queued") {
       this.armTimeout(input.clientMessageId);
       return;
     }
@@ -72,17 +72,17 @@ export class MessageLifecycleStore {
 
   /** Publish everything queued while offline (call on reconnect → connected). */
   async flushQueued(): Promise<void> {
-    const queued = [...this.pending.values()].filter(
-      p => p.status === 'queued',
+    const queuedMessages = [...this.pending.values()].filter(
+      (pendingMessage) => pendingMessage.status === "queued",
     );
-    for (const p of queued) {
-      const asPending: PendingMessage = { ...p, status: 'pending' };
-      this.pending.set(p.clientMessageId, asPending);
+    for (const queuedMessage of queuedMessages) {
+      const pendingMessage: PendingMessage = { ...queuedMessage, status: "pending" };
+      this.pending.set(queuedMessage.clientMessageId, pendingMessage);
       try {
-        await this.sendFn(asPending);
-        this.armTimeout(p.clientMessageId);
+        await this.sendFn(pendingMessage);
+        this.armTimeout(queuedMessage.clientMessageId);
       } catch {
-        this.markFailed(p.clientMessageId);
+        this.markFailed(queuedMessage.clientMessageId);
       }
     }
   }
@@ -98,24 +98,26 @@ export class MessageLifecycleStore {
   applyHistory(messages: ApiMessage[]): void {
     // A history response can race a newer canonical event. Never replace an
     // already-reconciled row with the older request snapshot.
-    for (const m of messages) {
-      if (!this.messages.has(m.id)) this.messages.set(m.id, m);
+    for (const message of messages) {
+      if (!this.messages.has(message.id)) this.messages.set(message.id, message);
     }
   }
 
   markFailed(clientMessageId: string): void {
-    const p = this.pending.get(clientMessageId);
-    if (p) this.pending.set(clientMessageId, { ...p, status: 'failed' });
+    const pendingMessage = this.pending.get(clientMessageId);
+    if (pendingMessage) {
+      this.pending.set(clientMessageId, { ...pendingMessage, status: "failed" });
+    }
     this.clearTimeout(clientMessageId);
   }
 
   /** Retry re-publishes the SAME clientMessageId (backend dedupes). */
   async retry(clientMessageId: string): Promise<void> {
-    const p = this.pending.get(clientMessageId);
-    if (!p || p.status === 'pending') return;
-    this.pending.set(clientMessageId, { ...p, status: 'pending' });
+    const pendingMessage = this.pending.get(clientMessageId);
+    if (!pendingMessage || pendingMessage.status === "pending") return;
+    this.pending.set(clientMessageId, { ...pendingMessage, status: "pending" });
     try {
-      await this.sendFn(p);
+      await this.sendFn(pendingMessage);
       this.armTimeout(clientMessageId);
     } catch {
       this.markFailed(clientMessageId);
@@ -124,7 +126,7 @@ export class MessageLifecycleStore {
 
   /** Clear all armed timeouts (used by tests / teardown). */
   dispose(): void {
-    for (const t of this.timeouts.values()) clearTimeout(t);
+    for (const timeout of this.timeouts.values()) clearTimeout(timeout);
     this.timeouts.clear();
   }
 
@@ -137,9 +139,9 @@ export class MessageLifecycleStore {
   }
 
   private clearTimeout(clientMessageId: string): void {
-    const t = this.timeouts.get(clientMessageId);
-    if (t) {
-      clearTimeout(t);
+    const timeout = this.timeouts.get(clientMessageId);
+    if (timeout) {
+      clearTimeout(timeout);
       this.timeouts.delete(clientMessageId);
     }
   }

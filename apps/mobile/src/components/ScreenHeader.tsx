@@ -1,7 +1,7 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, TOUCH_TARGET, typography } from '../theme/tokens';
+import React from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, radius, TOUCH_TARGET, typography } from "@app/theme/tokens";
 
 /**
  * ONE reusable native header primitive (§10): back + avatar + centered
@@ -16,7 +16,7 @@ export function ScreenHeader({
   avatarColor,
   avatarTextColor,
   onBack,
-  backLabel = 'Back',
+  backLabel = "Back",
   right,
   onPressTitle,
 }: {
@@ -54,23 +54,13 @@ export function ScreenHeader({
         style={styles.center}
         disabled={!onPressTitle}
         onPress={onPressTitle}
-        accessibilityRole={onPressTitle ? 'button' : undefined}
-        accessibilityLabel={
-          onPressTitle ? `Open details for ${title}` : undefined
-        }
+        accessibilityRole={onPressTitle ? "button" : undefined}
+        accessibilityLabel={onPressTitle ? `Open details for ${title}` : undefined}
       >
         {!!avatar && (
-          <View
-            style={[
-              styles.avatar,
-              { backgroundColor: avatarColor ?? colors.surfaceHigh },
-            ]}
-          >
+          <View style={[styles.avatar, { backgroundColor: avatarColor ?? colors.surfaceHigh }]}>
             <Text
-              style={[
-                styles.avatarText,
-                avatarTextColor ? { color: avatarTextColor } : undefined,
-              ]}
+              style={[styles.avatarText, avatarTextColor ? { color: avatarTextColor } : undefined]}
             >
               {avatar.slice(0, 2).toUpperCase()}
             </Text>
@@ -87,11 +77,7 @@ export function ScreenHeader({
           )}
         </View>
       </Pressable>
-      {right ? (
-        <View style={styles.rightSlot}>{right}</View>
-      ) : (
-        <View style={styles.sideSpacer} />
-      )}
+      {right ? <View style={styles.rightSlot}>{right}</View> : <View style={styles.sideSpacer} />}
     </View>
   );
 }
@@ -100,8 +86,8 @@ const HEADER_SIDE = 76; // fits "‹ Back" and "＋ New" on one line at every wi
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 8,
     paddingBottom: 8,
     borderBottomWidth: 1,
@@ -112,19 +98,19 @@ const styles = StyleSheet.create({
     minWidth: HEADER_SIDE,
     flexShrink: 0,
     height: TOUCH_TARGET,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   rightSlot: {
     minWidth: HEADER_SIDE,
     flexShrink: 0,
-    alignItems: 'flex-end',
+    alignItems: "flex-end",
   },
   sideSpacer: { width: HEADER_SIDE, flexShrink: 0 },
   center: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 10,
     paddingHorizontal: 4,
     minHeight: TOUCH_TARGET,
@@ -133,17 +119,17 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  avatarText: { color: colors.textPrimary, fontSize: 13, fontWeight: '700' },
-  titleBlock: { flexShrink: 1, alignItems: 'center' },
-  back: { color: colors.primaryStrong, fontSize: 16, fontWeight: '500' },
+  avatarText: { color: colors.textPrimary, fontSize: 13, fontWeight: "700" },
+  titleBlock: { flexShrink: 1, alignItems: "center" },
+  back: { color: colors.primaryStrong, fontSize: 16, fontWeight: "500" },
   title: { color: colors.textPrimary, ...typography.title },
   subtitle: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '400',
+    fontWeight: "400",
     marginTop: 1,
   },
 });

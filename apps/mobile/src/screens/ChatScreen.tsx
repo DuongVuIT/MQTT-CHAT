@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Animated,
@@ -20,19 +14,19 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ScreenHeader } from '../components/ScreenHeader';
-import { mediaUrl } from '../lib/config';
-import type { ApiMessage } from '../lib/api';
-import type { PendingMessage } from '../features/messaging/message-lifecycle';
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScreenHeader } from "@app/components/ScreenHeader";
+import type { PendingMessage } from "@app/features/messaging/message-lifecycle";
+import type { ApiMessage } from "@app/lib/api";
+import { mediaUrl } from "@app/lib/config";
 import {
   buildChatRows,
   formatSize,
   formatTime,
   mediaInfo,
   type ChatRow,
-} from '../features/messaging/message-rows';
+} from "@app/features/messaging/message-rows";
 import {
   avatarColorFor,
   colors,
@@ -41,7 +35,7 @@ import {
   radius,
   spacing,
   TOUCH_TARGET,
-} from '../theme/tokens';
+} from "@app/theme/tokens";
 
 /**
  * Chat screen v2 (phase-2 §10/§11/§12/§13/§14/§15/§16/§17/§19/§20/§21):
@@ -57,26 +51,27 @@ import {
  * All actions go through canonical commands — never local-only mutations.
  */
 
-const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🎉'] as const;
-type AttachmentRequest = 'image' | 'document';
+const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🎉"] as const;
+type AttachmentRequest = "image" | "document";
 
 /** Friendly label for the wire enum — never render FILE/VOICE raw (§11). */
 const TYPE_LABEL: Record<string, string> = {
-  IMAGE: 'Photo',
-  VIDEO: 'Video',
-  FILE: 'File',
-  VOICE: 'Voice message',
-  SYSTEM: 'System',
+  IMAGE: "Photo",
+  VIDEO: "Video",
+  FILE: "File",
+  VOICE: "Voice message",
+  SYSTEM: "System",
 };
 
-function fileGlyph(mimeType: string, filename: string): string {
-  const m = mimeType.toLowerCase();
-  if (m.includes('pdf') || filename.toLowerCase().endsWith('.pdf')) return '📕';
-  if (m.startsWith('text/') || /\.(txt|md|csv)$/i.test(filename)) return '📄';
-  if (m.includes('zip') || /\.(zip|tar|gz|rar)$/i.test(filename)) return '🗂️';
-  if (m.includes('sheet') || /\.(xlsx|numbers|csv)$/i.test(filename))
-    return '📊';
-  return '📎';
+function fileTypeLabel(mimeType: string, filename: string): string {
+  const normalizedMimeType = mimeType.toLowerCase();
+  if (normalizedMimeType.includes("pdf") || /\.pdf$/i.test(filename)) return "PDF";
+  if (normalizedMimeType.includes("zip") || /\.(zip|tar|gz|rar)$/i.test(filename)) return "ZIP";
+  if (normalizedMimeType.includes("sheet") || /\.(xlsx|numbers|csv)$/i.test(filename)) {
+    return "XLS";
+  }
+  if (normalizedMimeType.startsWith("text/") || /\.(txt|md)$/i.test(filename)) return "TXT";
+  return "FILE";
 }
 
 export interface ChatActions {
@@ -129,7 +124,7 @@ const MessageRow = React.memo(function MessageRow({
   animateIn,
   onAnimateDone,
 }: {
-  row: Extract<ChatRow, { kind: 'message' }>;
+  row: Extract<ChatRow, { kind: "message" }>;
   onLongPress: (message: ApiMessage) => void;
   onToggleChip: (message: ApiMessage, emoji: string, remove: boolean) => void;
   onOpenImage: (storageKey: string, filename: string) => void;
@@ -137,11 +132,9 @@ const MessageRow = React.memo(function MessageRow({
   animateIn: boolean;
   onAnimateDone: (key: string) => void;
 }): React.JSX.Element {
-  const { opacity, translateY } = useArrivalMotion(animateIn, () =>
-    onAnimateDone(row.key),
-  );
+  const { opacity, translateY } = useArrivalMotion(animateIn, () => onAnimateDone(row.key));
   const { message: m, mine } = row;
-  const info = !m.deletedAt && m.type !== 'TEXT' ? mediaInfo(m) : null;
+  const info = !m.deletedAt && m.type !== "TEXT" ? mediaInfo(m) : null;
 
   // Corner shaping follows the run: first bubble keeps its top corners round,
   // the run's tail tightens toward the sender (§12).
@@ -164,19 +157,14 @@ const MessageRow = React.memo(function MessageRow({
     >
       {row.showSender && (
         <View style={styles.senderRow}>
-          <View
-            style={[
-              styles.senderDot,
-              { backgroundColor: avatarColorFor(m.senderId).bg },
-            ]}
-          />
+          <View style={[styles.senderDot, { backgroundColor: avatarColorFor(m.senderId).bg }]} />
           <Text style={styles.sender}>{m.senderName}</Text>
         </View>
       )}
       <Pressable
         onLongPress={() => onLongPress(m)}
         delayLongPress={250}
-        android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
+        android_ripple={{ color: "rgba(255,255,255,0.06)" }}
         style={({ pressed }) => [
           styles.bubble,
           bubbleRadius,
@@ -186,8 +174,8 @@ const MessageRow = React.memo(function MessageRow({
         ]}
         accessibilityLabel={
           m.deletedAt
-            ? 'Message deleted'
-            : `${mine ? 'You' : m.senderName} said: ${m.content || (info ? info.filename : '')} at ${formatTime(m.createdAt)}`
+            ? "Message deleted"
+            : `${mine ? "You" : m.senderName} said: ${m.content || (info ? info.filename : "")} at ${formatTime(m.createdAt)}`
         }
       >
         {row.replySource && (
@@ -202,15 +190,14 @@ const MessageRow = React.memo(function MessageRow({
             </Text>
             <Text style={styles.replyContent} numberOfLines={2}>
               {row.replySource.deletedAt
-                ? 'Message deleted'
-                : row.replySource.content ||
-                  (mediaInfo(row.replySource)?.filename ?? 'Attachment')}
+                ? "Message deleted"
+                : row.replySource.content || (mediaInfo(row.replySource)?.filename ?? "Attachment")}
             </Text>
           </View>
         )}
         {m.deletedAt ? (
           <Text style={styles.deletedText}>Message deleted</Text>
-        ) : info && m.type === 'IMAGE' ? (
+        ) : info && m.type === "IMAGE" ? (
           <Pressable
             onPress={() => onOpenImage(info.storageKey, info.filename)}
             accessibilityRole="imagebutton"
@@ -220,10 +207,7 @@ const MessageRow = React.memo(function MessageRow({
               {!imageLoaded && <View style={styles.imagePlaceholder} />}
               <Image
                 source={{ uri: mediaUrl(info.storageKey) }}
-                style={[
-                  styles.image,
-                  imageLoaded ? styles.imageReady : styles.imageHidden,
-                ]}
+                style={[styles.image, imageLoaded ? styles.imageReady : styles.imageHidden]}
                 resizeMode="cover"
                 onLoad={() => setImageLoaded(true)}
               />
@@ -236,55 +220,43 @@ const MessageRow = React.memo(function MessageRow({
             accessibilityRole="button"
             accessibilityLabel={`Open file ${info.filename}`}
           >
-            <Text style={styles.fileIcon}>
-              {fileGlyph(info.mimeType, info.filename)}
-            </Text>
+            <View style={styles.fileIconWrap}>
+              <Text style={styles.fileIcon}>{fileTypeLabel(info.mimeType, info.filename)}</Text>
+            </View>
             <View style={styles.fileMeta}>
               <Text style={styles.fileName} numberOfLines={1}>
                 {info.filename}
               </Text>
               <Text style={styles.fileSub}>
                 {TYPE_LABEL[m.type] ?? TYPE_LABEL.FILE}
-                {info.size > 0 ? ` · ${formatSize(info.size)}` : ''}
+                {info.size > 0 ? ` · ${formatSize(info.size)}` : ""}
               </Text>
             </View>
             <Text style={styles.fileChevron}>›</Text>
           </Pressable>
         ) : (
-          <Text style={[styles.content, mine ? styles.contentMine : undefined]}>
-            {m.content}
-          </Text>
+          <Text style={[styles.content, mine ? styles.contentMine : undefined]}>{m.content}</Text>
         )}
         <View style={styles.metaRow}>
           {m.editedAt && !m.deletedAt && (
-            <Text style={[styles.meta, mine ? styles.metaMine : undefined]}>
-              edited
-            </Text>
+            <Text style={[styles.meta, mine ? styles.metaMine : undefined]}>edited</Text>
           )}
           <Text style={[styles.time, mine ? styles.timeMine : undefined]}>
             {formatTime(m.createdAt)}
           </Text>
           {mine && !m.deletedAt && (
             <Text
-              style={[
-                styles.receipt,
-                row.read ? styles.receiptRead : styles.receiptSent,
-              ]}
-              accessibilityLabel={row.read ? 'Read' : 'Sent'}
+              style={[styles.receipt, row.read ? styles.receiptRead : styles.receiptSent]}
+              accessibilityLabel={row.read ? "Read" : "Sent"}
             >
-              {row.read ? '✓✓' : '✓'}
+              {row.read ? "✓✓" : "✓"}
             </Text>
           )}
         </View>
       </Pressable>
       {row.chips.length > 0 && (
-        <View
-          style={[
-            styles.chipRow,
-            mine ? styles.chipRowMine : styles.chipRowTheirs,
-          ]}
-        >
-          {row.chips.map(chip => (
+        <View style={[styles.chipRow, mine ? styles.chipRowMine : styles.chipRowTheirs]}>
+          {row.chips.map((chip) => (
             <Pressable
               key={chip.emoji}
               onPress={() => onToggleChip(m, chip.emoji, chip.mine)}
@@ -294,13 +266,11 @@ const MessageRow = React.memo(function MessageRow({
                 pressed && styles.chipPressed,
               ]}
               accessibilityRole="button"
-              accessibilityLabel={`${chip.emoji} ${chip.count} — ${chip.mine ? 'remove your reaction' : 'react too'}`}
+              accessibilityLabel={`${chip.emoji} ${chip.count} — ${chip.mine ? "remove your reaction" : "react too"}`}
             >
               <Text style={styles.chipEmoji}>{chip.emoji}</Text>
               {chip.count > 1 && (
-                <Text
-                  style={[styles.chipCount, chip.mine && styles.chipCountMine]}
-                >
+                <Text style={[styles.chipCount, chip.mine && styles.chipCountMine]}>
                   {chip.count}
                 </Text>
               )}
@@ -316,48 +286,40 @@ const PendingRow = React.memo(function PendingRow({
   row,
   onRetry,
 }: {
-  row: Extract<ChatRow, { kind: 'pending' }>;
+  row: Extract<ChatRow, { kind: "pending" }>;
   onRetry: (clientMessageId: string) => void;
 }): React.JSX.Element {
-  const p = row.pending;
-  const failed = p.status === 'failed';
+  const pendingMessage = row.pending;
+  const failed = pendingMessage.status === "failed";
   return (
     <View style={[styles.rowWrap, styles.rowWrapMine]}>
-      <View
-        style={[
-          styles.bubble,
-          styles.bubbleMine,
-          failed && styles.bubbleFailed,
-        ]}
-      >
+      <View style={[styles.bubble, styles.bubbleMine, failed && styles.bubbleFailed]}>
         {row.media ? (
           <View style={styles.fileCard}>
-            <Text style={styles.fileIcon}>
-              {row.media.type === 'IMAGE' ? '🖼️' : '📎'}
-            </Text>
+            <View style={styles.fileIconWrap}>
+              <Text style={styles.fileIcon}>{row.media.type === "IMAGE" ? "IMG" : "FILE"}</Text>
+            </View>
             <View style={styles.fileMeta}>
               <Text style={styles.fileName} numberOfLines={1}>
                 {row.media.filename}
               </Text>
-              <Text style={styles.fileSub}>
-                {failed ? 'Upload failed' : 'Uploading…'}
-              </Text>
+              <Text style={styles.fileSub}>{failed ? "Upload failed" : "Uploading…"}</Text>
             </View>
           </View>
         ) : (
-          <Text style={styles.contentMine}>{p.content}</Text>
+          <Text style={styles.contentMine}>{pendingMessage.content}</Text>
         )}
         <View style={styles.metaRow}>
           <Text style={[styles.meta, styles.metaMine]}>
             {failed
-              ? 'Failed to send'
-              : p.status === 'queued'
-                ? 'Waiting for connection…'
-                : 'Sending…'}
+              ? "Failed to send"
+              : pendingMessage.status === "queued"
+                ? "Waiting for connection…"
+                : "Sending…"}
           </Text>
           {failed && (
             <Pressable
-              onPress={() => onRetry(p.clientMessageId)}
+              onPress={() => onRetry(pendingMessage.clientMessageId)}
               style={styles.retryBtn}
               accessibilityRole="button"
               accessibilityLabel="Retry sending"
@@ -425,14 +387,13 @@ export function ChatScreen({
   onTypingChange: (isTyping: boolean) => void;
   onOpenDetails: () => void;
 }) {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState("");
   const [inputHeight, setInputHeight] = useState(0);
   const [replyTo, setReplyTo] = useState<ApiMessage | null>(null);
   const [editing, setEditing] = useState<ApiMessage | null>(null);
   const [menuFor, setMenuFor] = useState<ApiMessage | null>(null);
   const [attachSheet, setAttachSheet] = useState(false);
-  const [pendingAttachment, setPendingAttachment] =
-    useState<AttachmentRequest | null>(null);
+  const [pendingAttachment, setPendingAttachment] = useState<AttachmentRequest | null>(null);
   const pendingAttachmentRef = useRef<AttachmentRequest | null>(null);
   const [lightbox, setLightbox] = useState<{
     key: string;
@@ -468,7 +429,7 @@ export function ChatScreen({
     // more than one dismissal signal during renderer transitions.
     pendingAttachmentRef.current = null;
     setPendingAttachment(null);
-    if (request === 'image') actions.pickImage();
+    if (request === "image") actions.pickImage();
     else actions.pickDocument();
   }, [actions]);
 
@@ -476,7 +437,7 @@ export function ChatScreen({
     // React Native only guarantees Modal.onDismiss on iOS. On Android this
     // effect runs after the `visible=false` commit has removed the host view,
     // so the native picker is never presented on top of a dismissing modal.
-    if (Platform.OS !== 'ios' && !attachSheet && pendingAttachment !== null) {
+    if (Platform.OS !== "ios" && !attachSheet && pendingAttachment !== null) {
       launchPendingAttachment();
     }
   }, [attachSheet, launchPendingAttachment, pendingAttachment]);
@@ -490,7 +451,7 @@ export function ChatScreen({
   const seenIdsRef = useRef<Set<string> | null>(null);
   const arrivedRef = useRef(new Set<string>());
   const pendingCountRef = useRef(pending.length);
-  const prevLastIdRef = useRef<string>('');
+  const prevLastIdRef = useRef<string>("");
 
   const rows = useMemo(
     () =>
@@ -506,11 +467,11 @@ export function ChatScreen({
   // animate in — history loads, prepends and gap-fills stay perfectly still.
   useEffect(() => {
     if (seenIdsRef.current === null) {
-      seenIdsRef.current = new Set(messages.map(m => m.id));
-      prevLastIdRef.current = messages[messages.length - 1]?.id ?? '';
+      seenIdsRef.current = new Set(messages.map((message) => message.id));
+      prevLastIdRef.current = messages[messages.length - 1]?.id ?? "";
       return;
     }
-    const lastId = messages[messages.length - 1]?.id ?? '';
+    const lastId = messages[messages.length - 1]?.id ?? "";
     for (const m of messages) {
       if (!seenIdsRef.current.has(m.id)) {
         seenIdsRef.current.add(m.id);
@@ -543,11 +504,7 @@ export function ChatScreen({
   }, [pending.length, followLatest]);
 
   const handleScroll = useCallback(
-    ({
-      nativeEvent: e,
-    }: {
-      nativeEvent: { contentOffset: { y: number } };
-    }): void => {
+    ({ nativeEvent: e }: { nativeEvent: { contentOffset: { y: number } } }): void => {
       const nearBottom = e.contentOffset.y < 80;
       pinnedRef.current = nearBottom;
       if (nearBottom && newCount > 0) setNewCount(0);
@@ -568,13 +525,13 @@ export function ChatScreen({
     if (editing) {
       actions.edit(editing.id, content);
       setEditing(null);
-      setDraft('');
+      setDraft("");
       onTypingChange(false);
       return;
     }
     onSend(content, replyTo?.id ?? null);
     setReplyTo(null);
-    setDraft('');
+    setDraft("");
     onTypingChange(false);
   };
 
@@ -596,7 +553,7 @@ export function ChatScreen({
 
   const renderItem = useCallback(
     ({ item }: { item: ChatRow }) => {
-      if (item.kind === 'date') {
+      if (item.kind === "date") {
         return (
           <View style={styles.dateWrap}>
             <View style={styles.datePill}>
@@ -605,7 +562,7 @@ export function ChatScreen({
           </View>
         );
       }
-      if (item.kind === 'pending') {
+      if (item.kind === "pending") {
         return <PendingRow row={item} onRetry={onRetry} />;
       }
       return (
@@ -637,7 +594,7 @@ export function ChatScreen({
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScreenHeader
         title={title}
@@ -680,7 +637,7 @@ export function ChatScreen({
           <FlatList
             ref={listRef}
             data={rows}
-            keyExtractor={r => r.key}
+            keyExtractor={(row) => row.key}
             // INVERTED: the newest row lives at offset 0. Opening lands on
             // the latest message with zero scroll work; older pages prepend
             // beyond the viewport without moving it (§34/§37).
@@ -703,8 +660,7 @@ export function ChatScreen({
               <>
                 {typingUsers.length > 0 && (
                   <Text style={styles.typing} numberOfLines={1}>
-                    {typingUsers.join(', ')}{' '}
-                    {typingUsers.length === 1 ? 'is' : 'are'} typing…
+                    {typingUsers.join(", ")} {typingUsers.length === 1 ? "is" : "are"} typing…
                   </Text>
                 )}
               </>
@@ -713,9 +669,7 @@ export function ChatScreen({
               // Visual top (inverted): older-page loader.
               loadingEarlier ? (
                 <View style={styles.earlierLoader}>
-                  <Text style={styles.earlierText}>
-                    Loading earlier messages…
-                  </Text>
+                  <Text style={styles.earlierText}>Loading earlier messages…</Text>
                 </View>
               ) : undefined
             }
@@ -724,20 +678,16 @@ export function ChatScreen({
                 <ChatSkeleton />
               ) : (
                 <View style={styles.emptyChatWrap}>
-                  <Text style={styles.emptyChatIcon}>👋</Text>
+                  <Text style={styles.emptyChatIcon}>MQ</Text>
                   <Text style={styles.emptyChatTitle}>No messages yet</Text>
-                  <Text style={styles.emptyChatBody}>
-                    Say hello — messages arrive in realtime.
-                  </Text>
+                  <Text style={styles.emptyChatBody}>Say hello — messages arrive in realtime.</Text>
                 </View>
               )
             }
             renderItem={renderItem}
           />
           {/* Floating jump-to-latest chip (§36) — overlays the transcript. */}
-          {newCount > 0 && (
-            <NewMessagePill count={newCount} onPress={goToLatest} />
-          )}
+          {newCount > 0 && <NewMessagePill count={newCount} onPress={goToLatest} />}
         </View>
       )}
 
@@ -746,10 +696,7 @@ export function ChatScreen({
         style={[
           styles.composer,
           {
-            paddingBottom: Math.max(
-              insets.bottom,
-              Platform.OS === 'ios' ? 10 : 6,
-            ),
+            paddingBottom: Math.max(insets.bottom, Platform.OS === "ios" ? 10 : 6),
           },
         ]}
       >
@@ -758,17 +705,13 @@ export function ChatScreen({
             <View style={styles.bannerAccent} />
             <View style={styles.bannerBody}>
               <Text style={styles.bannerLabel}>
-                {editing
-                  ? 'Editing message'
-                  : `Replying to ${replyTo?.senderName ?? ''}`}
+                {editing ? "Editing message" : `Replying to ${replyTo?.senderName ?? ""}`}
               </Text>
               <Text style={styles.bannerText} numberOfLines={1}>
                 {editing
-                  ? editing.content || 'Attachment'
+                  ? editing.content || "Attachment"
                   : replyTo?.content ||
-                    (replyTo
-                      ? (mediaInfo(replyTo)?.filename ?? 'Attachment')
-                      : '')}
+                    (replyTo ? (mediaInfo(replyTo)?.filename ?? "Attachment") : "")}
               </Text>
             </View>
             <Pressable
@@ -786,10 +729,7 @@ export function ChatScreen({
         )}
         <View style={styles.composerRow}>
           <Pressable
-            style={({ pressed }) => [
-              styles.roundBtn,
-              pressed && styles.roundBtnPressed,
-            ]}
+            style={({ pressed }) => [styles.roundBtn, pressed && styles.roundBtnPressed]}
             onPress={() => setAttachSheet(true)}
             accessibilityRole="button"
             accessibilityLabel="Attach photo or file"
@@ -800,14 +740,12 @@ export function ChatScreen({
             style={[styles.input, { height: Math.max(44, inputHeight) }]}
             value={draft}
             onChangeText={handleDraft}
-            placeholder={editing ? 'Edit message…' : 'Message'}
+            placeholder={editing ? "Edit message…" : "Message"}
             placeholderTextColor={colors.textMuted}
             onSubmitEditing={submit}
             returnKeyType="send"
             multiline
-            onContentSizeChange={e =>
-              setInputHeight(e.nativeEvent.contentSize.height)
-            }
+            onContentSizeChange={(event) => setInputHeight(event.nativeEvent.contentSize.height)}
             accessibilityLabel="Message input"
           />
           <Pressable
@@ -819,9 +757,9 @@ export function ChatScreen({
             onPress={submit}
             disabled={!canSend}
             accessibilityRole="button"
-            accessibilityLabel={editing ? 'Save edit' : 'Send message'}
+            accessibilityLabel={editing ? "Save edit" : "Send message"}
           >
-            <Text style={styles.sendIcon}>{editing ? '✓' : '➤'}</Text>
+            <Text style={styles.sendIcon}>{editing ? "✓" : "➤"}</Text>
           </Pressable>
         </View>
       </View>
@@ -837,30 +775,19 @@ export function ChatScreen({
       >
         <Pressable style={styles.sheetBackdrop} onPress={closeAttachmentSheet}>
           <Pressable
-            style={[
-              styles.sheet,
-              { paddingBottom: insets.bottom + spacing.lg },
-            ]}
+            style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]}
             onPress={() => undefined}
           >
             <View style={styles.sheetGrabber} />
             <Text style={styles.sheetHeading}>Attach</Text>
             <Pressable
-              style={({ pressed }) => [
-                styles.sheetOption,
-                pressed && styles.sheetOptionPressed,
-              ]}
-              onPress={() => requestAttachment('image')}
+              style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+              onPress={() => requestAttachment("image")}
               accessibilityRole="button"
               accessibilityLabel="Choose photo"
             >
-              <View
-                style={[
-                  styles.sheetIconWrap,
-                  { backgroundColor: colors.primarySoft },
-                ]}
-              >
-                <Text style={styles.sheetIcon}>🖼️</Text>
+              <View style={[styles.sheetIconWrap, { backgroundColor: colors.primarySoft }]}>
+                <Text style={styles.sheetIcon}>IMG</Text>
               </View>
               <View style={styles.sheetTextWrap}>
                 <Text style={styles.sheetOptionTitle}>Photo</Text>
@@ -868,21 +795,13 @@ export function ChatScreen({
               </View>
             </Pressable>
             <Pressable
-              style={({ pressed }) => [
-                styles.sheetOption,
-                pressed && styles.sheetOptionPressed,
-              ]}
-              onPress={() => requestAttachment('document')}
+              style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+              onPress={() => requestAttachment("document")}
               accessibilityRole="button"
               accessibilityLabel="Choose document"
             >
-              <View
-                style={[
-                  styles.sheetIconWrap,
-                  { backgroundColor: colors.successSoft },
-                ]}
-              >
-                <Text style={styles.sheetIcon}>📄</Text>
+              <View style={[styles.sheetIconWrap, { backgroundColor: colors.successSoft }]}>
+                <Text style={styles.sheetIcon}>DOC</Text>
               </View>
               <View style={styles.sheetTextWrap}>
                 <Text style={styles.sheetOptionTitle}>Document</Text>
@@ -890,10 +809,7 @@ export function ChatScreen({
               </View>
             </Pressable>
             <Pressable
-              style={({ pressed }) => [
-                styles.sheetCancel,
-                pressed && styles.sheetOptionPressed,
-              ]}
+              style={({ pressed }) => [styles.sheetCancel, pressed && styles.sheetOptionPressed]}
               onPress={closeAttachmentSheet}
               accessibilityRole="button"
               accessibilityLabel="Cancel attach"
@@ -913,15 +829,12 @@ export function ChatScreen({
       >
         <Pressable style={styles.menuOverlay} onPress={() => setMenuFor(null)}>
           <Pressable
-            style={[
-              styles.menuSheet,
-              { paddingBottom: insets.bottom + spacing.md },
-            ]}
+            style={[styles.menuSheet, { paddingBottom: insets.bottom + spacing.md }]}
             onPress={() => undefined}
           >
             <View style={styles.sheetGrabber} />
             <View style={styles.reactionBar}>
-              {QUICK_REACTIONS.map(emoji => (
+              {QUICK_REACTIONS.map((emoji) => (
                 <Pressable
                   key={emoji}
                   style={({ pressed }) => [
@@ -941,10 +854,7 @@ export function ChatScreen({
             </View>
             {menuFor && !menuFor.deletedAt && (
               <Pressable
-                style={({ pressed }) => [
-                  styles.menuItem,
-                  pressed && styles.menuItemPressed,
-                ]}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
                 onPress={() => {
                   setReplyTo(menuFor);
                   setMenuFor(null);
@@ -958,10 +868,7 @@ export function ChatScreen({
             )}
             {menuFor && !menuFor.deletedAt && menuFor.content.length > 0 && (
               <Pressable
-                style={({ pressed }) => [
-                  styles.menuItem,
-                  pressed && styles.menuItemPressed,
-                ]}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
                 onPress={() => {
                   void Clipboard.setString(menuFor.content);
                   setMenuFor(null);
@@ -975,12 +882,9 @@ export function ChatScreen({
             )}
             {menuFor?.senderId === identityUserId &&
               !menuFor.deletedAt &&
-              menuFor.type === 'TEXT' && (
+              menuFor.type === "TEXT" && (
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    pressed && styles.menuItemPressed,
-                  ]}
+                  style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
                   onPress={() => {
                     if (menuFor) {
                       setEditing(menuFor);
@@ -997,10 +901,7 @@ export function ChatScreen({
               )}
             {menuFor?.senderId === identityUserId && !menuFor.deletedAt && (
               <Pressable
-                style={({ pressed }) => [
-                  styles.menuItem,
-                  pressed && styles.menuItemPressed,
-                ]}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
                 onPress={() => {
                   if (menuFor) actions.delete(menuFor.id);
                   setMenuFor(null);
@@ -1008,19 +909,14 @@ export function ChatScreen({
                 accessibilityRole="button"
                 accessibilityLabel="Delete message"
               >
-                <Text style={[styles.menuItemIcon, styles.menuItemDanger]}>
-                  🗑
+                <Text style={[styles.menuItemIcon, styles.menuItemDelete, styles.menuItemDanger]}>
+                  DEL
                 </Text>
-                <Text style={[styles.menuItemText, styles.menuItemDanger]}>
-                  Delete
-                </Text>
+                <Text style={[styles.menuItemText, styles.menuItemDanger]}>Delete</Text>
               </Pressable>
             )}
             <Pressable
-              style={({ pressed }) => [
-                styles.menuCancel,
-                pressed && styles.menuItemPressed,
-              ]}
+              style={({ pressed }) => [styles.menuCancel, pressed && styles.menuItemPressed]}
               onPress={() => setMenuFor(null)}
               accessibilityRole="button"
               accessibilityLabel="Cancel"
@@ -1093,15 +989,12 @@ function NewMessagePill({
     >
       <Pressable
         onPress={onPress}
-        style={({ pressed }) => [
-          styles.newPillBtn,
-          pressed && styles.newPillPressed,
-        ]}
+        style={({ pressed }) => [styles.newPillBtn, pressed && styles.newPillPressed]}
         accessibilityRole="button"
-        accessibilityLabel={`Jump to ${count} new message${count === 1 ? '' : 's'}`}
+        accessibilityLabel={`Jump to ${count} new message${count === 1 ? "" : "s"}`}
       >
         <Text style={styles.newPillText}>
-          ↓ {count} new message{count === 1 ? '' : 's'}
+          ↓ {count} new message{count === 1 ? "" : "s"}
         </Text>
       </Pressable>
     </Animated.View>
@@ -1114,10 +1007,7 @@ function ChatSkeleton(): React.JSX.Element {
   return (
     <View>
       {bubbles.map((w, i) => (
-        <View
-          key={i}
-          style={[i % 2 === 0 ? styles.rowWrapTheirs : styles.rowWrapMine]}
-        >
+        <View key={i} style={[i % 2 === 0 ? styles.rowWrapTheirs : styles.rowWrapMine]}>
           <View
             style={[
               styles.skeletonBubble,
@@ -1141,8 +1031,8 @@ const styles = StyleSheet.create({
   headerAction: {
     minWidth: TOUCH_TARGET,
     height: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerActionText: { color: colors.primaryStrong, fontSize: 20 },
 
@@ -1152,20 +1042,20 @@ const styles = StyleSheet.create({
   rowWrap: {
     marginHorizontal: spacing.md,
     marginVertical: 1.5,
-    maxWidth: '78%',
+    maxWidth: "78%",
   },
-  rowWrapMine: { alignSelf: 'flex-end', alignItems: 'flex-end' },
-  rowWrapTheirs: { alignSelf: 'flex-start', alignItems: 'flex-start' },
+  rowWrapMine: { alignSelf: "flex-end", alignItems: "flex-end" },
+  rowWrapTheirs: { alignSelf: "flex-start", alignItems: "flex-start" },
   senderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     marginLeft: 2,
     marginBottom: 3,
     marginTop: 6,
   },
   senderDot: { width: 8, height: 8, borderRadius: 4 },
-  sender: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  sender: { color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
   bubble: {
     paddingVertical: 7,
     paddingHorizontal: 12,
@@ -1181,10 +1071,10 @@ const styles = StyleSheet.create({
   deletedText: {
     color: colors.textMuted,
     fontSize: 14,
-    fontStyle: 'italic',
+    fontStyle: "italic",
   },
   // Media (§20): reserved dimensions — no layout shift on load.
-  imageWrap: { position: 'relative' },
+  imageWrap: { position: "relative" },
   image: {
     width: 220,
     height: 160,
@@ -1193,7 +1083,7 @@ const styles = StyleSheet.create({
   imageReady: { opacity: 1 },
   imageHidden: { opacity: 0 },
   imagePlaceholder: {
-    position: 'absolute',
+    position: "absolute",
     width: 220,
     height: 160,
     borderRadius: radius.md,
@@ -1201,31 +1091,39 @@ const styles = StyleSheet.create({
   },
   // File card (§21): icon + name + size, chevron affordance, no raw keys.
   fileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     minWidth: 190,
   },
-  fileIcon: { fontSize: 26 },
+  fileIconWrap: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fileIcon: { color: colors.primaryStrong, fontSize: 10, fontWeight: "800" },
   fileMeta: { flex: 1 },
-  fileName: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  fileName: { color: colors.textPrimary, fontSize: 14, fontWeight: "600" },
   fileSub: { color: colors.textSecondary, fontSize: 11, marginTop: 2 },
-  fileChevron: { color: colors.textMuted, fontSize: 18, fontWeight: '600' },
+  fileChevron: { color: colors.textMuted, fontSize: 18, fontWeight: "600" },
   // Meta + receipts (§14): quiet ticks, never large status words.
   metaRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 6,
     marginTop: 3,
-    alignItems: 'center',
-    alignSelf: 'flex-end',
+    alignItems: "center",
+    alignSelf: "flex-end",
   },
   meta: { color: colors.textSecondary, fontSize: 10 },
-  metaMine: { color: 'rgba(255,255,255,0.75)' },
+  metaMine: { color: "rgba(255,255,255,0.75)" },
   time: { color: colors.textMuted, fontSize: 10 },
-  timeMine: { color: 'rgba(255,255,255,0.55)' },
-  receipt: { fontSize: 10, fontWeight: '700', letterSpacing: -1 },
-  receiptSent: { color: 'rgba(255,255,255,0.55)' },
-  receiptRead: { color: '#B9C4FF' },
+  timeMine: { color: "rgba(255,255,255,0.55)" },
+  receipt: { fontSize: 10, fontWeight: "700", letterSpacing: -1 },
+  receiptSent: { color: "rgba(255,255,255,0.55)" },
+  receiptRead: { color: "#B9C4FF" },
   // Reply preview (§15): accent line + sender + truncated content.
   replyPreview: {
     borderLeftWidth: 3,
@@ -1233,28 +1131,28 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     gap: 1,
   },
-  replyPreviewMine: { borderLeftColor: 'rgba(255,255,255,0.6)' },
+  replyPreviewMine: { borderLeftColor: "rgba(255,255,255,0.6)" },
   replyPreviewTheirs: { borderLeftColor: colors.primaryStrong },
   replyName: {
     color: colors.textPrimary,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
     opacity: 0.85,
   },
   replyContent: { color: colors.textSecondary, fontSize: 12 },
   // Reaction chips (§16): compact, thumb-friendly, own-reaction highlighted.
   chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 4,
     marginTop: 3,
     marginHorizontal: 2,
   },
-  chipRowMine: { alignSelf: 'flex-end' },
-  chipRowTheirs: { alignSelf: 'flex-start' },
+  chipRowMine: { alignSelf: "flex-end" },
+  chipRowTheirs: { alignSelf: "flex-start" },
   chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     backgroundColor: colors.surfaceRaised,
     borderRadius: radius.full,
@@ -1269,7 +1167,7 @@ const styles = StyleSheet.create({
   },
   chipPressed: { opacity: 0.8 },
   chipEmoji: { fontSize: 13 },
-  chipCount: { color: colors.textPrimary, fontSize: 12, fontWeight: '600' },
+  chipCount: { color: colors.textPrimary, fontSize: 12, fontWeight: "600" },
   chipCountMine: { color: colors.primaryStrong },
   // Pending (§14): failed state exposes Retry clearly.
   bubbleFailed: {
@@ -1280,12 +1178,12 @@ const styles = StyleSheet.create({
   retryBtn: {
     minWidth: TOUCH_TARGET,
     height: 28,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingHorizontal: 8,
   },
-  retryText: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+  retryText: { color: colors.danger, fontSize: 12, fontWeight: "700" },
   // Date separators (§13): quiet, centered, only on day change.
-  dateWrap: { alignItems: 'center', marginVertical: 10 },
+  dateWrap: { alignItems: "center", marginVertical: 10 },
   datePill: {
     backgroundColor: colors.surface,
     borderRadius: radius.full,
@@ -1294,42 +1192,52 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  dateText: { color: colors.textSecondary, fontSize: 11, fontWeight: '600' },
+  dateText: { color: colors.textSecondary, fontSize: 11, fontWeight: "600" },
   typing: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontStyle: 'italic',
+    fontStyle: "italic",
     marginLeft: spacing.lg,
     marginVertical: 6,
   },
-  earlierLoader: { paddingVertical: spacing.md, alignItems: 'center' },
+  earlierLoader: { paddingVertical: spacing.md, alignItems: "center" },
   earlierText: { color: colors.textMuted, fontSize: 12 },
-  emptyChatWrap: { alignItems: 'center', marginTop: 96, paddingHorizontal: 32 },
-  emptyChatIcon: { fontSize: 40, marginBottom: 10 },
+  emptyChatWrap: { alignItems: "center", marginTop: 96, paddingHorizontal: 32 },
+  emptyChatIcon: {
+    color: colors.primaryStrong,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.lg,
+    fontSize: 14,
+    fontWeight: "800",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    marginBottom: spacing.md,
+    overflow: "hidden",
+  },
   emptyChatTitle: {
     color: colors.textPrimary,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   emptyChatBody: {
     color: colors.textSecondary,
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 4,
     lineHeight: 18,
   },
   errorState: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 32,
     gap: 6,
   },
-  errorTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
+  errorTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: "600" },
   errorBody: {
     color: colors.textSecondary,
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
   },
   errorRetry: {
     marginTop: spacing.md,
@@ -1338,9 +1246,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     minHeight: TOUCH_TARGET - 4,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
-  errorRetryText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
+  errorRetryText: { color: colors.onPrimary, fontWeight: "700", fontSize: 14 },
   skeletonBubble: {
     height: 36,
     borderRadius: radius.bubble,
@@ -1349,15 +1257,15 @@ const styles = StyleSheet.create({
   },
   skeletonTheirs: {
     backgroundColor: colors.surfaceRaised,
-    alignSelf: 'flex-start',
+    alignSelf: "flex-start",
   },
-  skeletonMine: { backgroundColor: colors.surface, alignSelf: 'flex-end' },
+  skeletonMine: { backgroundColor: colors.surface, alignSelf: "flex-end" },
 
   // ---- Floating new-message pill (§36) ------------------------------------
   newPill: {
-    position: 'absolute',
+    position: "absolute",
     bottom: spacing.sm,
-    alignSelf: 'center',
+    alignSelf: "center",
   },
   newPillBtn: {
     backgroundColor: colors.primaryStrong,
@@ -1366,7 +1274,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   newPillPressed: { opacity: 0.85 },
-  newPillText: { color: colors.background, fontSize: 12, fontWeight: '700' },
+  newPillText: { color: colors.background, fontSize: 12, fontWeight: "700" },
 
   // ---- Composer (§19) ------------------------------------------------------
   composer: {
@@ -1377,31 +1285,31 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   banner: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     marginBottom: spacing.sm,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   bannerAccent: {
     width: 3,
-    alignSelf: 'stretch',
+    alignSelf: "stretch",
     backgroundColor: colors.primaryStrong,
   },
   bannerBody: { flex: 1, paddingHorizontal: 10, paddingVertical: 6, gap: 1 },
-  bannerLabel: { color: colors.primaryStrong, fontSize: 11, fontWeight: '700' },
+  bannerLabel: { color: colors.primaryStrong, fontSize: 11, fontWeight: "700" },
   bannerText: { color: colors.textSecondary, fontSize: 13 },
   bannerClose: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   bannerCloseText: { color: colors.textSecondary, fontSize: 15 },
   composerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
+    flexDirection: "row",
+    alignItems: "flex-end",
     gap: spacing.sm,
   },
   roundBtn: {
@@ -1409,8 +1317,8 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: radius.full,
     backgroundColor: colors.surfaceRaised,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   roundBtnPressed: { opacity: 0.8 },
   attachIcon: { color: colors.textPrimary, fontSize: 22, marginTop: -2 },
@@ -1430,8 +1338,8 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: radius.full,
     backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   sendBtnIdle: { backgroundColor: colors.surfaceHigh, opacity: 0.6 },
   sendIcon: { color: colors.onPrimary, fontSize: 17 },
@@ -1440,7 +1348,7 @@ const styles = StyleSheet.create({
   sheetBackdrop: {
     flex: 1,
     backgroundColor: colors.scrim,
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
   },
   sheet: {
     backgroundColor: colors.surface,
@@ -1451,7 +1359,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   sheetGrabber: {
-    alignSelf: 'center',
+    alignSelf: "center",
     width: 36,
     height: 4,
     borderRadius: 2,
@@ -1461,14 +1369,14 @@ const styles = StyleSheet.create({
   sheetHeading: {
     color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: spacing.sm,
   },
   sheetOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
     paddingVertical: 10,
     paddingHorizontal: 6,
@@ -1480,20 +1388,20 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: radius.sm + 2,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  sheetIcon: { fontSize: 18 },
+  sheetIcon: { color: colors.primaryStrong, fontSize: 10, fontWeight: "800" },
   sheetTextWrap: { flex: 1 },
   sheetOptionTitle: {
     color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   sheetOptionBody: { color: colors.textSecondary, fontSize: 12, marginTop: 1 },
   sheetCancel: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: spacing.xs + 2,
     backgroundColor: colors.surfaceRaised,
     borderRadius: radius.md,
@@ -1502,12 +1410,12 @@ const styles = StyleSheet.create({
   sheetCancelText: {
     color: colors.textPrimary,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   menuOverlay: {
     flex: 1,
     backgroundColor: colors.scrim,
-    justifyContent: 'flex-end',
+    justifyContent: "flex-end",
   },
   menuSheet: {
     backgroundColor: colors.surface,
@@ -1516,8 +1424,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   reactionBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm + 2,
     borderBottomWidth: 1,
@@ -1528,14 +1436,14 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   reactionBtnPressed: { backgroundColor: colors.surfaceHigh },
   reactionEmoji: { fontSize: 27 },
   menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
     paddingHorizontal: spacing.md,
     minHeight: 50,
@@ -1543,11 +1451,12 @@ const styles = StyleSheet.create({
   },
   menuItemPressed: { backgroundColor: colors.surfaceHigh },
   menuItemIcon: { fontSize: 17, width: 22, color: colors.textSecondary },
+  menuItemDelete: { fontSize: 9, fontWeight: "800" },
   menuItemText: { color: colors.textPrimary, fontSize: 15 },
   menuItemDanger: { color: colors.danger },
   menuCancel: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginVertical: spacing.xs + 2,
     backgroundColor: colors.surfaceRaised,
     borderRadius: radius.md,
@@ -1557,21 +1466,21 @@ const styles = StyleSheet.create({
   // ---- Lightbox (§20) ------------------------------------------------------
   lightbox: {
     flex: 1,
-    backgroundColor: 'rgba(2, 6, 16, 0.96)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(2, 6, 16, 0.96)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  lightboxImage: { width: '100%', height: '80%' },
+  lightboxImage: { width: "100%", height: "80%" },
   lightboxClose: {
-    position: 'absolute',
+    position: "absolute",
     top: 60,
     right: 24,
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  lightboxCloseText: { color: '#FFFFFF', fontSize: 16 },
+  lightboxCloseText: { color: "#FFFFFF", fontSize: 16 },
 });

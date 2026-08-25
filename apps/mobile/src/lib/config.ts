@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform } from "react-native";
 
 /**
  * Environment-aware SINGLE-ORIGIN config.
@@ -15,17 +15,14 @@ import { Platform } from 'react-native';
  *   MQTT_CHAT_API_URL      — full REST base URL (rarely needed)
  *   MQTT_CHAT_MQTT_WS_URL  — full MQTT WebSocket URL (rarely needed)
  */
-const DEV_HOST = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+const DEV_HOST = Platform.OS === "android" ? "10.0.2.2" : "localhost";
 
 /** Public origin "host:port" — the ONLY endpoint mobile needs. */
-export const PUBLIC_HOST =
-  process.env.MQTT_CHAT_PUBLIC_HOST ?? `${DEV_HOST}:3000`;
+export const PUBLIC_HOST = process.env.MQTT_CHAT_PUBLIC_HOST ?? `${DEV_HOST}:3000`;
 
-export const API_BASE =
-  process.env.MQTT_CHAT_API_URL ?? `http://${PUBLIC_HOST}/api`;
+export const API_BASE = process.env.MQTT_CHAT_API_URL ?? `http://${PUBLIC_HOST}/api`;
 
-export const MQTT_WS_URL =
-  process.env.MQTT_CHAT_MQTT_WS_URL ?? `ws://${PUBLIC_HOST}/mqtt`;
+export const MQTT_WS_URL = process.env.MQTT_CHAT_MQTT_WS_URL ?? `ws://${PUBLIC_HOST}/mqtt`;
 
 /** Canonical media path served by the gateway → API streaming handler. */
 export function mediaUrl(storageKey: string): string {

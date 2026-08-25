@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -9,10 +9,10 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
-import { ScreenHeader } from '../components/ScreenHeader';
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { initialsFromDisplayName } from "@mqtt-chat/realtime-core";
+import { ScreenHeader } from "@app/components/ScreenHeader";
 import {
   avatarColorFor,
   colors,
@@ -20,8 +20,8 @@ import {
   spacing,
   typography,
   TOUCH_TARGET,
-} from '../theme/tokens';
-import { api, type ApiUser } from '../lib/api';
+} from "@app/theme/tokens";
+import { api, type ApiUser } from "@app/lib/api";
 
 /**
  * New conversation flow (§23) — intent-first:
@@ -43,159 +43,133 @@ export function NewConversationScreen({
   users: ApiUser[];
   identityUserId: string | null;
   onBack: () => void;
-  onCreated: (
-    conversation: Awaited<ReturnType<typeof api.createConversation>>,
-  ) => void;
+  onCreated: (conversation: Awaited<ReturnType<typeof api.createConversation>>) => void;
 }) {
-  const [mode, setMode] = useState<'choose' | 'direct' | 'group'>('choose');
-  const [title, setTitle] = useState('');
-  const [filter, setFilter] = useState('');
+  const [mode, setMode] = useState<"choose" | "direct" | "group">("choose");
+  const [title, setTitle] = useState("");
+  const [filter, setFilter] = useState("");
   // Identity = Set<userId> — never display names.
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
 
-  const visible = useMemo(
+  const visibleUsers = useMemo(
     () =>
       users.filter(
-        u =>
-          u.id !== identityUserId &&
-          (filter.trim() === '' ||
-            u.displayName.toLowerCase().includes(filter.trim().toLowerCase())),
+        (user) =>
+          user.id !== identityUserId &&
+          (filter.trim() === "" ||
+            user.displayName.toLowerCase().includes(filter.trim().toLowerCase())),
       ),
     [users, filter, identityUserId],
   );
 
-  const toggle = (userId: string, on: boolean): void => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (on) next.add(userId);
-      else next.delete(userId);
-      return next;
+  const toggleUser = (userId: string, isSelected: boolean): void => {
+    setSelectedUserIds((previousIds) => {
+      const nextIds = new Set(previousIds);
+      if (isSelected) nextIds.add(userId);
+      else nextIds.delete(userId);
+      return nextIds;
     });
   };
 
   const createDirect = async (peerId: string): Promise<void> => {
-    if (!identityUserId || busy) return;
-    setBusy(true);
+    if (!identityUserId || isSubmitting) return;
+    setIsSubmitting(true);
     setError(null);
     try {
       const conversation = await api.createConversation({
-        type: 'DIRECT',
+        type: "DIRECT",
         createdBy: identityUserId,
         memberIds: [identityUserId, peerId],
       });
       onCreated(conversation);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to open conversation');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to open conversation");
     } finally {
-      setBusy(false);
+      setIsSubmitting(false);
     }
   };
 
   const createGroup = async (): Promise<void> => {
-    if (!identityUserId || selected.size < 2 || busy) return;
-    setBusy(true);
+    if (!identityUserId || selectedUserIds.size < 2 || isSubmitting) return;
+    setIsSubmitting(true);
     setError(null);
     try {
       const conversation = await api.createConversation({
-        type: 'GROUP',
+        type: "GROUP",
         title: title.trim() || undefined,
         createdBy: identityUserId,
-        memberIds: [identityUserId, ...selected],
+        memberIds: [identityUserId, ...selectedUserIds],
       });
       onCreated(conversation);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create group');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to create group");
     } finally {
-      setBusy(false);
+      setIsSubmitting(false);
     }
   };
 
   const headerTitle =
-    mode === 'direct'
-      ? 'New message'
-      : mode === 'group'
-        ? 'New group'
-        : 'New conversation';
+    mode === "direct" ? "New message" : mode === "group" ? "New group" : "New conversation";
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScreenHeader
         title={headerTitle}
         onBack={() => {
-          if (mode === 'choose') onBack();
+          if (mode === "choose") onBack();
           else {
-            setMode('choose');
-            setSelected(new Set());
-            setFilter('');
-            setTitle('');
+            setMode("choose");
+            setSelectedUserIds(new Set());
+            setFilter("");
+            setTitle("");
             setError(null);
           }
         }}
       />
 
-      {mode === 'choose' ? (
+      {mode === "choose" ? (
         <View style={styles.choose}>
           <Text style={styles.chooseHint}>What do you want to start?</Text>
           <Pressable
-            style={({ pressed }) => [
-              styles.intentCard,
-              pressed && styles.intentPressed,
-            ]}
-            onPress={() => setMode('direct')}
+            style={({ pressed }) => [styles.intentCard, pressed && styles.intentPressed]}
+            onPress={() => setMode("direct")}
             accessibilityRole="button"
             accessibilityLabel="New direct message"
           >
-            <View
-              style={[
-                styles.intentIconWrap,
-                { backgroundColor: colors.primarySoft },
-              ]}
-            >
-              <Text style={styles.intentIcon}>💬</Text>
+            <View style={[styles.intentIconWrap, { backgroundColor: colors.primarySoft }]}>
+              <Text style={styles.intentIcon}>DM</Text>
             </View>
             <View style={styles.intentBody}>
               <Text style={styles.intentTitle}>Message someone</Text>
-              <Text style={styles.intentText}>
-                Private one-on-one conversation.
-              </Text>
+              <Text style={styles.intentText}>Private one-on-one conversation.</Text>
             </View>
             <Text style={styles.intentChevron}>›</Text>
           </Pressable>
           <Pressable
-            style={({ pressed }) => [
-              styles.intentCard,
-              pressed && styles.intentPressed,
-            ]}
-            onPress={() => setMode('group')}
+            style={({ pressed }) => [styles.intentCard, pressed && styles.intentPressed]}
+            onPress={() => setMode("group")}
             accessibilityRole="button"
             accessibilityLabel="Create a group"
           >
-            <View
-              style={[
-                styles.intentIconWrap,
-                { backgroundColor: colors.successSoft },
-              ]}
-            >
-              <Text style={styles.intentIcon}>👥</Text>
+            <View style={[styles.intentIconWrap, { backgroundColor: colors.successSoft }]}>
+              <Text style={styles.intentIcon}>GR</Text>
             </View>
             <View style={styles.intentBody}>
               <Text style={styles.intentTitle}>Create a group</Text>
-              <Text style={styles.intentText}>
-                Bring several people into one chat.
-              </Text>
+              <Text style={styles.intentText}>Bring several people into one chat.</Text>
             </View>
             <Text style={styles.intentChevron}>›</Text>
           </Pressable>
         </View>
       ) : (
         <>
-          {mode === 'group' && (
+          {mode === "group" && (
             <View style={styles.form}>
               <TextInput
                 style={styles.input}
@@ -213,32 +187,30 @@ export function NewConversationScreen({
               style={styles.input}
               value={filter}
               onChangeText={setFilter}
-              placeholder={mode === 'group' ? 'Add members…' : 'Search people…'}
+              placeholder={mode === "group" ? "Add members…" : "Search people…"}
               placeholderTextColor={colors.textMuted}
-              accessibilityLabel={
-                mode === 'group' ? 'Search members' : 'Search people'
-              }
+              accessibilityLabel={mode === "group" ? "Search members" : "Search people"}
             />
             {error && <Text style={styles.error}>{error}</Text>}
           </View>
 
-          {mode === 'group' && selected.size > 0 && (
+          {mode === "group" && selectedUserIds.size > 0 && (
             <View style={styles.chosenWrap}>
-              <Text style={styles.chosenLabel}>{selected.size} selected</Text>
+              <Text style={styles.chosenLabel}>{selectedUserIds.size} selected</Text>
               <View style={styles.chosenRow}>
-                {[...selected].map(id => {
-                  const u = users.find(x => x.id === id);
-                  const c = avatarColorFor(id);
+                {[...selectedUserIds].map((userId) => {
+                  const user = users.find((candidate) => candidate.id === userId);
+                  const avatarColors = avatarColorFor(userId);
                   return (
                     <Pressable
-                      key={id}
-                      style={[styles.chip, { backgroundColor: c.bg }]}
-                      onPress={() => toggle(id, false)}
+                      key={userId}
+                      style={[styles.chip, { backgroundColor: avatarColors.bg }]}
+                      onPress={() => toggleUser(userId, false)}
                       accessibilityRole="button"
-                      accessibilityLabel={`Remove ${u?.displayName ?? id}`}
+                      accessibilityLabel={`Remove ${user?.displayName ?? userId}`}
                     >
                       <Text style={styles.chipText}>
-                        {initialsFromDisplayName(u?.displayName)}
+                        {initialsFromDisplayName(user?.displayName)}
                       </Text>
                       <Text style={styles.chipClose}>✕</Text>
                     </Pressable>
@@ -249,26 +221,23 @@ export function NewConversationScreen({
           )}
 
           <FlatList
-            data={visible}
-            keyExtractor={u => u.id}
+            data={visibleUsers}
+            keyExtractor={(user) => user.id}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingBottom: spacing.lg }}
             renderItem={({ item }) => {
-              const c = avatarColorFor(item.id);
-              return mode === 'direct' ? (
+              const avatarColors = avatarColorFor(item.id);
+              return mode === "direct" ? (
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && styles.rowPressed,
-                  ]}
-                  disabled={busy}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  disabled={isSubmitting}
                   onPress={() => {
                     void createDirect(item.id);
                   }}
                   accessibilityRole="button"
                   accessibilityLabel={`Message ${item.displayName}`}
                 >
-                  <View style={[styles.avatar, { backgroundColor: c.bg }]}>
+                  <View style={[styles.avatar, { backgroundColor: avatarColors.bg }]}>
                     <Text style={styles.avatarText}>
                       {initialsFromDisplayName(item.displayName)}
                     </Text>
@@ -280,26 +249,18 @@ export function NewConversationScreen({
                 </Pressable>
               ) : (
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.row,
-                    pressed && styles.rowPressed,
-                  ]}
-                  onPress={() => toggle(item.id, !selected.has(item.id))}
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                  onPress={() => toggleUser(item.id, !selectedUserIds.has(item.id))}
                   accessibilityRole="checkbox"
-                  accessibilityState={{ checked: selected.has(item.id) }}
+                  accessibilityState={{ checked: selectedUserIds.has(item.id) }}
                   accessibilityLabel={`Add ${item.displayName}`}
                 >
                   <View
-                    style={[
-                      styles.checkbox,
-                      selected.has(item.id) && styles.checkboxOn,
-                    ]}
+                    style={[styles.checkbox, selectedUserIds.has(item.id) && styles.checkboxOn]}
                   >
-                    {selected.has(item.id) && (
-                      <Text style={styles.check}>✓</Text>
-                    )}
+                    {selectedUserIds.has(item.id) && <Text style={styles.check}>✓</Text>}
                   </View>
-                  <View style={[styles.avatar, { backgroundColor: c.bg }]}>
+                  <View style={[styles.avatar, { backgroundColor: avatarColors.bg }]}>
                     <Text style={styles.avatarText}>
                       {initialsFromDisplayName(item.displayName)}
                     </Text>
@@ -310,27 +271,17 @@ export function NewConversationScreen({
                 </Pressable>
               );
             }}
-            ListEmptyComponent={
-              <Text style={styles.empty}>No people match</Text>
-            }
+            ListEmptyComponent={<Text style={styles.empty}>No people match</Text>}
           />
 
-          {mode === 'group' && (
-            <View
-              style={[
-                styles.footer,
-                { paddingBottom: Math.max(insets.bottom + 10, 16) },
-              ]}
-            >
-              {busy ? (
+          {mode === "group" && (
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + 10, 16) }]}>
+              {isSubmitting ? (
                 <ActivityIndicator color={colors.primaryStrong} />
               ) : (
                 <Pressable
-                  style={[
-                    styles.createBtn,
-                    selected.size < 2 && styles.disabled,
-                  ]}
-                  disabled={selected.size < 2}
+                  style={[styles.createBtn, selectedUserIds.size < 2 && styles.disabled]}
+                  disabled={selectedUserIds.size < 2}
                   onPress={() => {
                     void createGroup();
                   }}
@@ -339,7 +290,7 @@ export function NewConversationScreen({
                 >
                   <Text style={styles.createText}>
                     Create group
-                    {selected.size > 0 ? ` · ${selected.size + 1}` : ''}
+                    {selectedUserIds.size > 0 ? ` · ${selectedUserIds.size + 1}` : ""}
                   </Text>
                 </Pressable>
               )}
@@ -360,36 +311,38 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   intentCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceRaised,
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   intentPressed: { backgroundColor: colors.surfaceHigh },
   intentIconWrap: {
     width: 44,
     height: 44,
     borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  intentIcon: { fontSize: 21 },
+  intentIcon: { color: colors.primaryStrong, fontSize: 12, fontWeight: "800" },
   intentBody: { flex: 1, gap: 2 },
   intentTitle: { ...typography.title, color: colors.textPrimary },
   intentText: { ...typography.caption, color: colors.textSecondary },
-  intentChevron: { color: colors.textMuted, fontSize: 20, fontWeight: '600' },
+  intentChevron: { color: colors.textMuted, fontSize: 20, fontWeight: "600" },
   form: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     gap: spacing.sm,
   },
   input: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    backgroundColor: colors.surfaceRaised,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
     paddingHorizontal: spacing.md,
     minHeight: 44,
     paddingVertical: 10,
@@ -399,21 +352,21 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, fontSize: 13 },
   chosenWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: 6 },
   chosenLabel: { ...typography.meta, color: colors.textMuted },
-  chosenRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chosenRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     borderRadius: radius.full,
     paddingLeft: 4,
     paddingRight: 10,
     paddingVertical: 4,
   },
-  chipText: { color: colors.textPrimary, fontWeight: '700', fontSize: 13 },
-  chipClose: { color: 'rgba(255,255,255,0.7)', fontSize: 11 },
+  chipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
+  chipClose: { color: "rgba(255,255,255,0.7)", fontSize: 11 },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
@@ -426,26 +379,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 2,
     borderColor: colors.borderStrong,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  check: { color: colors.onPrimary, fontSize: 14, fontWeight: '700' },
+  check: { color: colors.onPrimary, fontSize: 14, fontWeight: "700" },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  avatarText: { color: colors.textPrimary, fontWeight: '700' },
+  avatarText: { color: colors.textPrimary, fontWeight: "700" },
   name: {
     ...typography.body,
     color: colors.textPrimary,
     flex: 1,
   },
-  openHint: { color: colors.primaryStrong, fontSize: 13, fontWeight: '600' },
-  empty: { color: colors.textMuted, textAlign: 'center', marginTop: 24 },
+  openHint: { color: colors.primaryStrong, fontSize: 13, fontWeight: "600" },
+  empty: { color: colors.textMuted, textAlign: "center", marginTop: 24 },
   footer: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm + 2,
@@ -457,9 +410,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     minHeight: TOUCH_TARGET + 4,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   disabled: { opacity: 0.4 },
-  createText: { color: colors.onPrimary, fontWeight: '700', fontSize: 15 },
+  createText: { color: colors.onPrimary, fontWeight: "700", fontSize: 15 },
 });

@@ -11,18 +11,15 @@
  * never append blindly (duplicate-key regression class).
  */
 
-import {
-  advanceMemberWatermark,
-  normalizeConversation,
-} from '@mqtt-chat/realtime-core';
-import type { ApiConversation, ApiMessage } from '../../lib/api';
+import { advanceMemberWatermark, normalizeConversation } from "@mqtt-chat/realtime-core";
+import type { ApiConversation, ApiMessage } from "@app/lib/api";
 
 export type ConversationEventTypeName =
-  | 'conversation.created'
-  | 'conversation.updated'
-  | 'conversation.deleted'
-  | 'conversation.member-joined'
-  | 'conversation.member-left';
+  | "conversation.created"
+  | "conversation.updated"
+  | "conversation.deleted"
+  | "conversation.member-joined"
+  | "conversation.member-left";
 
 /**
  * Apply a canonical conversation lifecycle event to a list.
@@ -41,42 +38,38 @@ export function applyConversationEvent(
 ): ApiConversation[] {
   // Deleted group (#28): tombstone event carries the pre-delete member
   // snapshot — every relevant client removes the entity deterministically.
-  if (eventType === 'conversation.deleted') {
+  if (eventType === "conversation.deleted") {
     const raw = (data ?? {}) as Record<string, unknown>;
-    const deletedId = typeof raw['id'] === 'string' ? raw['id'] : '';
+    const deletedId = typeof raw["id"] === "string" ? raw["id"] : "";
     if (!deletedId) return list;
-    const memberIds = Array.isArray(raw['memberIds'])
-      ? (raw['memberIds'] as unknown[]).filter(
-          (x): x is string => typeof x === 'string',
+    const memberIds = Array.isArray(raw["memberIds"])
+      ? (raw["memberIds"] as unknown[]).filter(
+          (memberId): memberId is string => typeof memberId === "string",
         )
       : [];
-    if (
-      selfUserId !== null &&
-      memberIds.length > 0 &&
-      !memberIds.includes(selfUserId)
-    ) {
+    if (selfUserId !== null && memberIds.length > 0 && !memberIds.includes(selfUserId)) {
       return list; // not my problem
     }
-    return list.filter(c => c.id !== deletedId);
+    return list.filter((conversation) => conversation.id !== deletedId);
   }
 
   const conversation = normalizeConversation(data);
   if (!conversation.id) return list;
 
   // Removed while I was a member → drop the entity entirely.
-  if (eventType === 'conversation.member-left') {
-    const rawRemoved = (data as Record<string, unknown>)?.['removedUserId'];
+  if (eventType === "conversation.member-left") {
+    const rawRemoved = (data as Record<string, unknown>)?.["removedUserId"];
     if (rawRemoved === selfUserId) {
-      return list.filter(c => c.id !== conversation.id);
+      return list.filter((candidate) => candidate.id !== conversation.id);
     }
-    if (!list.some(c => c.id === conversation.id)) return list;
+    if (!list.some((candidate) => candidate.id === conversation.id)) return list;
     return upsertPreservingActivity(list, conversation);
   }
 
   // created / updated / member-joined: relevant when I am (still) a member.
-  const isMember = conversation.members.some(m => m.userId === selfUserId);
-  if (!isMember && eventType === 'conversation.created') return list;
-  if (!isMember && !list.some(c => c.id === conversation.id)) return list;
+  const isMember = conversation.members.some((member) => member.userId === selfUserId);
+  if (!isMember && eventType === "conversation.created") return list;
+  if (!isMember && !list.some((candidate) => candidate.id === conversation.id)) return list;
 
   return upsertPreservingActivity(list, conversation);
 }
@@ -86,21 +79,17 @@ function upsertPreservingActivity(
   list: ApiConversation[],
   incoming: ApiConversation,
 ): ApiConversation[] {
-  const existing = list.find(c => c.id === incoming.id);
+  const existing = list.find((conversation) => conversation.id === incoming.id);
   const merged: ApiConversation = existing
     ? {
         ...incoming,
-        lastMessagePreview:
-          incoming.lastMessagePreview ?? existing.lastMessagePreview,
+        lastMessagePreview: incoming.lastMessagePreview ?? existing.lastMessagePreview,
         lastMessageAt: incoming.lastMessageAt ?? existing.lastMessageAt,
-        lastSequence: Math.max(
-          existing.lastSequence ?? 0,
-          incoming.lastSequence ?? 0,
-        ),
+        lastSequence: Math.max(existing.lastSequence ?? 0, incoming.lastSequence ?? 0),
       }
     : incoming;
   return existing
-    ? list.map(c => (c.id === incoming.id ? merged : c))
+    ? list.map((conversation) => (conversation.id === incoming.id ? merged : conversation))
     : [merged, ...list];
 }
 
@@ -118,14 +107,14 @@ export function applyMessageActivity(
     at: string;
   },
 ): ApiConversation[] {
-  const updated = list.map(c => {
-    if (c.id !== input.conversationId) return c;
-    const lastSequence = c.lastSequence ?? 0;
-    if (input.sequence <= lastSequence) return c; // monotonic — never regress
+  const updated = list.map((conversation) => {
+    if (conversation.id !== input.conversationId) return conversation;
+    const lastSequence = conversation.lastSequence ?? 0;
+    if (input.sequence <= lastSequence) return conversation;
     return {
-      ...c,
+      ...conversation,
       lastSequence: input.sequence,
-      lastMessagePreview: input.preview ?? c.lastMessagePreview ?? null,
+      lastMessagePreview: input.preview ?? conversation.lastMessagePreview ?? null,
       lastMessageAt: input.at,
     };
   });
@@ -149,31 +138,34 @@ export function applyReadReceipt(
   input: { conversationId: string; userId: string; lastReadSequence: number },
 ): ApiConversation[] {
   let changed = false;
-  const next = list.map(c => {
-    if (c.id !== input.conversationId) return c;
+  const nextList = list.map((conversation) => {
+    if (conversation.id !== input.conversationId) return conversation;
     const members = advanceMemberWatermark(
-      c.members,
+      conversation.members,
       input.userId,
       input.lastReadSequence,
     );
-    if (!members) return c;
+    if (!members) return conversation;
     changed = true;
-    return { ...c, members };
+    return { ...conversation, members };
   });
-  return changed ? next : list;
+  return changed ? nextList : list;
 }
 
 /** Most recently active conversation first (creation order is meaningless). */
 export function sortByActivity(list: ApiConversation[]): ApiConversation[] {
-  return [...list].sort((a, b) => {
-    const ta = a.lastMessageAt ? Date.parse(a.lastMessageAt) : 0;
-    const tb = b.lastMessageAt ? Date.parse(b.lastMessageAt) : 0;
-    return tb - ta;
+  return [...list].sort((firstConversation, secondConversation) => {
+    const firstTimestamp = firstConversation.lastMessageAt
+      ? Date.parse(firstConversation.lastMessageAt)
+      : 0;
+    const secondTimestamp = secondConversation.lastMessageAt
+      ? Date.parse(secondConversation.lastMessageAt)
+      : 0;
+    return secondTimestamp - firstTimestamp;
   });
 }
 
-export type MessageReactionEventTypeName =
-  'reaction.added' | 'reaction.removed';
+export type MessageReactionEventTypeName = "reaction.added" | "reaction.removed";
 
 /**
  * Apply a canonical reaction event to ONE conversation's message list.
@@ -188,28 +180,28 @@ export function applyReactionEvent(
   eventType: MessageReactionEventTypeName,
   data: unknown,
 ): ApiMessage[] {
-  const d = (data ?? {}) as Record<string, unknown>;
-  const messageId = typeof d['messageId'] === 'string' ? d['messageId'] : '';
-  const emoji = typeof d['emoji'] === 'string' ? d['emoji'] : '';
-  const userId = typeof d['userId'] === 'string' ? d['userId'] : '';
+  const eventData = (data ?? {}) as Record<string, unknown>;
+  const messageId = typeof eventData["messageId"] === "string" ? eventData["messageId"] : "";
+  const emoji = typeof eventData["emoji"] === "string" ? eventData["emoji"] : "";
+  const userId = typeof eventData["userId"] === "string" ? eventData["userId"] : "";
   if (!messageId || !emoji || !userId) return list;
 
-  const wantPresent = eventType === 'reaction.added';
+  const wantPresent = eventType === "reaction.added";
   let changed = false;
-  const next = list.map(m => {
-    if (m.id !== messageId) return m;
-    const reactions = m.reactions ?? [];
+  const nextList = list.map((message) => {
+    if (message.id !== messageId) return message;
+    const reactions = message.reactions ?? [];
     const exists = reactions.some(
-      r => r.emoji === emoji && r.userId === userId,
+      (reaction) => reaction.emoji === emoji && reaction.userId === userId,
     );
-    if (exists === wantPresent) return m; // already in the target state
+    if (exists === wantPresent) return message;
     changed = true;
     return {
-      ...m,
+      ...message,
       reactions: wantPresent
         ? [...reactions, { emoji, userId }]
-        : reactions.filter(r => !(r.emoji === emoji && r.userId === userId)),
+        : reactions.filter((reaction) => !(reaction.emoji === emoji && reaction.userId === userId)),
     };
   });
-  return changed ? next : list;
+  return changed ? nextList : list;
 }

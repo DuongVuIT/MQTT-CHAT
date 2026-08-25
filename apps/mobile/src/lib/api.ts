@@ -4,7 +4,7 @@
  * see lib/config.ts.
  */
 
-import { API_BASE } from './config';
+import { API_BASE } from "@app/lib/config";
 
 export { API_BASE };
 
@@ -22,7 +22,7 @@ export interface ApiConversationMember {
 
 export interface ApiConversation {
   id: string;
-  type: 'DIRECT' | 'GROUP';
+  type: "DIRECT" | "GROUP";
   title: string | null;
   memberCount?: number;
   lastSequence?: number;
@@ -36,10 +36,10 @@ export interface ApiMessage {
   clientMessageId: string;
   conversationId: string;
   senderId: string;
-  senderType: 'USER' | 'BOT' | 'SYSTEM';
+  senderType: "USER" | "BOT" | "SYSTEM";
   senderName: string;
   sequence: number;
-  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'VOICE' | 'SYSTEM';
+  type: "TEXT" | "IMAGE" | "VIDEO" | "FILE" | "VOICE" | "SYSTEM";
   content: string;
   replyToId: string | null;
   metadata: unknown;
@@ -51,7 +51,7 @@ export interface ApiMessage {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
     ...init,
   });
   if (!res.ok) {
@@ -67,59 +67,53 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listUsers: () => request<{ users: ApiUser[] }>('/users').then(r => r.users),
+  listUsers: () => request<{ users: ApiUser[] }>("/users").then((r) => r.users),
   /** MUST pass the identity userId: without it the API returns EVERY user's
    * conversations (the server only filters when userId is present) — every
    * other user's DM with a peer rendered as a "duplicate" contact. */
   listConversations: (userId?: string) =>
     request<{ conversations: ApiConversation[] }>(
-      `/conversations${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`,
-    ).then(r => r.conversations),
+      `/conversations${userId ? `?userId=${encodeURIComponent(userId)}` : ""}`,
+    ).then((r) => r.conversations),
   getMessages: (
     conversationId: string,
     opts?: { limit?: number; before?: number; after?: number },
   ) => {
     const params = new URLSearchParams();
-    if (opts?.limit) params.set('limit', String(opts.limit));
-    if (opts?.before) params.set('before', String(opts.before));
-    if (opts?.after) params.set('after', String(opts.after));
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.before) params.set("before", String(opts.before));
+    if (opts?.after) params.set("after", String(opts.after));
     const qs = params.toString();
     return request<{ messages: ApiMessage[]; hasMore: boolean }>(
-      `/conversations/${encodeURIComponent(conversationId)}/messages${qs ? `?${qs}` : ''}`,
+      `/conversations/${encodeURIComponent(conversationId)}/messages${qs ? `?${qs}` : ""}`,
     );
   },
   getPresence: (userIds: string[]) =>
     request<{
       presence: Record<string, { online: boolean; connectionCount: number }>;
-    }>(`/presence?userIds=${encodeURIComponent(userIds.join(','))}`).then(
-      r => r.presence,
-    ),
+    }>(`/presence?userIds=${encodeURIComponent(userIds.join(","))}`).then((r) => r.presence),
   /** Create a DIRECT (exactly 2 distinct ids) or GROUP conversation. */
   createConversation: (body: {
-    type: 'DIRECT' | 'GROUP';
+    type: "DIRECT" | "GROUP";
     title?: string;
     createdBy: string;
     memberIds: string[];
   }) =>
-    request<{ conversation: ApiConversation }>('/conversations', {
-      method: 'POST',
+    request<{ conversation: ApiConversation }>("/conversations", {
+      method: "POST",
       body: JSON.stringify(body),
-    }).then(r => r.conversation),
+    }).then((r) => r.conversation),
   /** Add members to a group (admin-only) — canonical member-joined. */
-  addMembers: (
-    conversationId: string,
-    userIds: string[],
-    actorUserId: string,
-  ) =>
+  addMembers: (conversationId: string, userIds: string[], actorUserId: string) =>
     request<{ added: number }>(
       `/conversations/${encodeURIComponent(conversationId)}/members?actor=${encodeURIComponent(actorUserId)}`,
-      { method: 'POST', body: JSON.stringify({ userIds }) },
+      { method: "POST", body: JSON.stringify({ userIds }) },
     ),
   /** Remove a member (admin) or self-leave — canonical member-left. */
   removeMember: (conversationId: string, userId: string, actorUserId: string) =>
     request<{ removed: boolean }>(
       `/conversations/${encodeURIComponent(conversationId)}/members/${encodeURIComponent(userId)}?actor=${encodeURIComponent(actorUserId)}`,
-      { method: 'DELETE' },
+      { method: "DELETE" },
     ),
   /**
    * Delete a GROUP (tombstone — canonical conversation.deleted reconciles
@@ -128,7 +122,7 @@ export const api = {
   deleteConversation: (conversationId: string, actorUserId: string) =>
     request<{ deleted: boolean; absent?: boolean }>(
       `/conversations/${encodeURIComponent(conversationId)}?actor=${encodeURIComponent(actorUserId)}`,
-      { method: 'DELETE' },
+      { method: "DELETE" },
     ),
   /**
    * Same-origin multipart upload → durable storageKey. Binary NEVER goes
@@ -144,16 +138,16 @@ export const api = {
     size: number;
   }> => {
     const form = new FormData();
-    form.append('conversationId', conversationId);
+    form.append("conversationId", conversationId);
     // RN's FormData type accepts the {uri,name,type} asset part directly.
-    form.append('file', {
+    form.append("file", {
       uri: file.uri,
       name: file.name,
       type: file.type,
     });
     // Two type systems describe FormData (RN vs fetch's BodyInit) — bridge
     // at this single boundary; the runtime accepts the RN asset part.
-    const init = { method: 'POST', body: form } as unknown as RequestInit;
+    const init = { method: "POST", body: form } as unknown as RequestInit;
     const res = await fetch(`${API_BASE}/uploads`, init);
     if (!res.ok) {
       const body = (await res.json().catch(() => null)) as {

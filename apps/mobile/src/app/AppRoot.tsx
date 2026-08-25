@@ -1,43 +1,27 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { launchImageLibrary, type Asset } from 'react-native-image-picker';
-import { pick, types as docTypes } from '@react-native-documents/picker';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  normalizeMediaType,
-  resolveMediaType,
-} from '@mqtt-chat/mqtt-contracts';
-import { initialsFromDisplayName } from '@mqtt-chat/realtime-core';
-import { api } from '../lib/api';
-import { useChatSession, type Identity } from '../hooks/useChatSession';
-import { IdentityPickerScreen } from '../screens/IdentityPickerScreen';
-import { ConversationListScreen } from '../screens/ConversationListScreen';
-import { ChatScreen } from '../screens/ChatScreen';
-import { NewConversationScreen } from '../screens/NewConversationScreen';
-import { GroupDetailsScreen } from '../screens/GroupDetailsScreen';
-import { ProfileSheet } from '../components/ProfileSheet';
-import {
-  colors,
-  elevation,
-  radius,
-  spacing,
-  typography,
-} from '../theme/tokens';
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { launchImageLibrary, type Asset } from "react-native-image-picker";
+import { pick, types as docTypes } from "@react-native-documents/picker";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { normalizeMediaType, resolveMediaType } from "@mqtt-chat/mqtt-contracts";
+import { initialsFromDisplayName } from "@mqtt-chat/realtime-core";
+import { ProfileSheet } from "@app/components/ProfileSheet";
+import { useChatSession, type Identity } from "@app/hooks/useChatSession";
+import { api } from "@app/lib/api";
+import { ChatScreen } from "@app/screens/ChatScreen";
+import { ConversationListScreen } from "@app/screens/ConversationListScreen";
+import { GroupDetailsScreen } from "@app/screens/GroupDetailsScreen";
+import { IdentityPickerScreen } from "@app/screens/IdentityPickerScreen";
+import { NewConversationScreen } from "@app/screens/NewConversationScreen";
+import { colors, elevation, radius, spacing, typography } from "@app/theme/tokens";
 
 type Route =
-  | { screen: 'picker' }
-  | { screen: 'list' }
-  | { screen: 'new' }
-  | { screen: 'details'; conversationId: string }
+  | { screen: "picker" }
+  | { screen: "list" }
+  | { screen: "new" }
+  | { screen: "details"; conversationId: string }
   | {
-      screen: 'chat';
+      screen: "chat";
       conversationId: string;
       title: string;
       subtitle: string | null;
@@ -46,9 +30,9 @@ type Route =
 
 /** Peer-relative display title: A sees B's name and vice versa. */
 function conversationTitle(
-  conv:
+  conversation:
     | {
-        type: 'DIRECT' | 'GROUP';
+        type: "DIRECT" | "GROUP";
         title: string | null;
         members: Array<{ userId: string }>;
       }
@@ -56,12 +40,10 @@ function conversationTitle(
   users: Awaited<ReturnType<typeof api.listUsers>>,
   identityUserId: string | null,
 ): string {
-  if (!conv) return 'Direct chat';
-  if (conv.type === 'GROUP') return conv.title ?? 'Group';
-  const peerId = conv.members.find(m => m.userId !== identityUserId)?.userId;
-  return (
-    users.find(u => u.id === peerId)?.displayName ?? peerId ?? 'Direct chat'
-  );
+  if (!conversation) return "Direct chat";
+  if (conversation.type === "GROUP") return conversation.title ?? "Group";
+  const peerId = conversation.members.find((member) => member.userId !== identityUserId)?.userId;
+  return users.find((user) => user.id === peerId)?.displayName ?? peerId ?? "Direct chat";
 }
 
 /**
@@ -72,13 +54,11 @@ function conversationTitle(
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 export function AppRoot() {
-  const [users, setUsers] = useState<Awaited<ReturnType<typeof api.listUsers>>>(
-    [],
-  );
+  const [users, setUsers] = useState<Awaited<ReturnType<typeof api.listUsers>>>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [identity, setIdentity] = useState<Identity | null>(null);
-  const [route, setRoute] = useState<Route>({ screen: 'picker' });
+  const [route, setRoute] = useState<Route>({ screen: "picker" });
   const [uploading, setUploading] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const session = useChatSession(identity);
@@ -90,11 +70,12 @@ export function AppRoot() {
     let cancelled = false;
     void (async () => {
       try {
-        const us = await api.listUsers();
-        if (!cancelled) setUsers(us);
-      } catch (e) {
-        if (!cancelled)
-          setLoadError(e instanceof Error ? e.message : 'failed to load users');
+        const availableUsers = await api.listUsers();
+        if (!cancelled) setUsers(availableUsers);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "failed to load users");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -104,25 +85,24 @@ export function AppRoot() {
     };
   }, []);
 
-  const identityUser = users.find(u => u.id === identity?.userId) ?? null;
+  const identityUser = users.find((user) => user.id === identity?.userId) ?? null;
 
   // Deleted-conversation guards must not setRoute during render (a blank
   // frame used to flash) — defer to an effect. Only trust the check once the
   // roster has actually loaded, or the first paint would bounce home.
   const ghostRoute =
     session.conversations.length > 0 &&
-    (route.screen === 'details' || route.screen === 'chat') &&
-    !session.conversations.some(c => c.id === route.conversationId);
+    (route.screen === "details" || route.screen === "chat") &&
+    !session.conversations.some((conversation) => conversation.id === route.conversationId);
 
   useEffect(() => {
-    if (ghostRoute && identity) setRoute({ screen: 'list' });
+    if (ghostRoute && identity) setRoute({ screen: "list" });
   }, [ghostRoute, identity]);
 
   // Viewing catch-up (REG-02): messages arriving while the chat screen stays
   // open must be marked read — parity with web's transcript effect. The
   // monotonic throttle inside markVisibleRead keeps this cheap.
-  const viewedConversationId =
-    route.screen === 'chat' ? route.conversationId : null;
+  const viewedConversationId = route.screen === "chat" ? route.conversationId : null;
   useEffect(() => {
     if (!viewedConversationId || !identity) return;
     const list = session.messagesByConv[viewedConversationId];
@@ -149,11 +129,9 @@ export function AppRoot() {
             setLoading(true);
             api
               .listUsers()
-              .then(us => setUsers(us))
-              .catch(e =>
-                setLoadError(
-                  e instanceof Error ? e.message : 'failed to load users',
-                ),
+              .then((us) => setUsers(us))
+              .catch((error) =>
+                setLoadError(error instanceof Error ? error.message : "failed to load users"),
               )
               .finally(() => setLoading(false));
           }}
@@ -166,16 +144,16 @@ export function AppRoot() {
     );
   }
 
-  if (route.screen === 'picker' || !identity) {
+  if (route.screen === "picker" || !identity) {
     return (
       <IdentityPickerScreen
         users={users}
-        onPick={userId => {
+        onPick={(userId) => {
           setIdentity({
             userId,
             deviceId: `mobile-${Date.now().toString(36)}`,
           });
-          setRoute({ screen: 'list' });
+          setRoute({ screen: "list" });
         }}
       />
     );
@@ -183,13 +161,11 @@ export function AppRoot() {
 
   // ---- Attachment flows (binary via REST upload; MQTT carries metadata) ---
   const activeConversationId =
-    route.screen === 'chat' || route.screen === 'details'
-      ? route.conversationId
-      : null;
+    route.screen === "chat" || route.screen === "details" ? route.conversationId : null;
 
   const handlePickedFile = async (
     file: { uri: string; name: string; type: string; size: number },
-    kind: 'IMAGE' | 'FILE',
+    kind: "IMAGE" | "FILE",
   ): Promise<void> => {
     const conversationId = activeConversationId;
     if (!conversationId || !identity) return;
@@ -209,7 +185,7 @@ export function AppRoot() {
         conversationId,
         clientMessageId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         type: kind,
-        content: '',
+        content: "",
         replyToId: null,
         metadata: {
           storageKey: uploaded.key,
@@ -217,67 +193,63 @@ export function AppRoot() {
           mimeType: uploaded.mimeType,
           size: uploaded.size,
         },
-        pendingContent: `📎 ${uploaded.filename}`,
+        pendingContent: uploaded.filename,
       });
-    } catch (e) {
-      AlertUploadFailed(e instanceof Error ? e.message : 'Unknown error');
+    } catch (error) {
+      AlertUploadFailed(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setUploading(false);
     }
   };
 
   const pickImage = (): void => {
-    void launchImageLibrary({ mediaType: 'photo', quality: 0.8 }).then(
-      result => {
-        const asset: Asset | undefined = result.assets?.[0];
-        if (!asset?.uri) return; // user cancelled
-        // Canonical normalization (repair-log #26): fold picker aliases
-        // (image/jpg → image/jpeg), fall back to the filename extension when
-        // the platform omits MIME, and give a PRECISE product error for
-        // intentionally-unsupported formats (HEIC/HEIF).
-        const resolved = resolveMediaType(asset.type, asset.fileName);
-        const normalized = normalizeMediaType(asset.type);
-        if (!resolved) {
-          const isHeic =
-            normalized === 'image/heic' ||
-            normalized === 'image/heif' ||
-            asset.fileName?.toLowerCase().endsWith('.heic') ||
-            asset.fileName?.toLowerCase().endsWith('.heif');
-          AlertUnsupported(
-            isHeic
-              ? 'HEIC/HEIF photos are not supported yet. Share the photo as JPEG instead.'
-              : `Type ${normalized ?? 'unknown'} is not supported.`,
-          );
-          return;
-        }
-        if (!resolved.startsWith('image/')) {
-          AlertUnsupported(`${resolved} is not an image type.`);
-          return;
-        }
-        void handlePickedFile(
-          {
-            uri: asset.uri,
-            name:
-              asset.fileName ??
-              `photo-${Date.now()}.${resolved === 'image/png' ? 'png' : 'jpg'}`,
-            type: resolved, // canonical value — never re-validated server-side
-            size: asset.fileSize ?? 0,
-          },
-          'IMAGE',
+    void launchImageLibrary({ mediaType: "photo", quality: 0.8 }).then((result) => {
+      const asset: Asset | undefined = result.assets?.[0];
+      if (!asset?.uri) return; // user cancelled
+      // Canonical normalization (repair-log #26): fold picker aliases
+      // (image/jpg → image/jpeg), fall back to the filename extension when
+      // the platform omits MIME, and give a PRECISE product error for
+      // intentionally-unsupported formats (HEIC/HEIF).
+      const resolved = resolveMediaType(asset.type, asset.fileName);
+      const normalized = normalizeMediaType(asset.type);
+      if (!resolved) {
+        const isHeic =
+          normalized === "image/heic" ||
+          normalized === "image/heif" ||
+          asset.fileName?.toLowerCase().endsWith(".heic") ||
+          asset.fileName?.toLowerCase().endsWith(".heif");
+        AlertUnsupported(
+          isHeic
+            ? "HEIC/HEIF photos are not supported yet. Share the photo as JPEG instead."
+            : `Type ${normalized ?? "unknown"} is not supported.`,
         );
-      },
-    );
+        return;
+      }
+      if (!resolved.startsWith("image/")) {
+        AlertUnsupported(`${resolved} is not an image type.`);
+        return;
+      }
+      void handlePickedFile(
+        {
+          uri: asset.uri,
+          name: asset.fileName ?? `photo-${Date.now()}.${resolved === "image/png" ? "png" : "jpg"}`,
+          type: resolved, // canonical value — never re-validated server-side
+          size: asset.fileSize ?? 0,
+        },
+        "IMAGE",
+      );
+    });
   };
 
   const pickDocument = (): void => {
     void pick({ type: [docTypes.pdf] })
-      .then(results => {
+      .then((results) => {
         const doc = results[0];
         if (!doc?.uri) return;
         const name = doc.name ?? `document-${Date.now()}.pdf`;
         // Same canonical policy as images (repair-log #26): normalize the
         // platform MIME; fall back to the extension when absent.
-        const resolved = resolveMediaType(doc.type, name) ?? 'application/pdf';
+        const resolved = resolveMediaType(doc.type, name) ?? "application/pdf";
         void handlePickedFile(
           {
             uri: doc.uri,
@@ -285,7 +257,7 @@ export function AppRoot() {
             type: resolved,
             size: doc.size ?? 0,
           },
-          'FILE',
+          "FILE",
         );
       })
       .catch(() => {
@@ -293,34 +265,32 @@ export function AppRoot() {
       });
   };
 
-  if (route.screen === 'new') {
+  if (route.screen === "new") {
     return (
       <NewConversationScreen
         users={users}
         identityUserId={identity.userId}
-        onBack={() => setRoute({ screen: 'list' })}
-        onCreated={conversation => {
+        onBack={() => setRoute({ screen: "list" })}
+        onCreated={(conversation) => {
           // Optimistic upsert; the canonical conversation.created event also
           // arrives and collapses into the SAME entity (id upsert).
           session.upsertLocalConversation(conversation);
           setRoute({
-            screen: 'chat',
+            screen: "chat",
             conversationId: conversation.id,
             title: conversationTitle(conversation, users, identity.userId),
             subtitle:
-              conversation.type === 'GROUP'
-                ? `${conversation.members.length} members`
-                : null,
-            isGroup: conversation.type === 'GROUP',
+              conversation.type === "GROUP" ? `${conversation.members.length} members` : null,
+            isGroup: conversation.type === "GROUP",
           });
         }}
       />
     );
   }
 
-  if (route.screen === 'details') {
+  if (route.screen === "details") {
     const conversation = session.conversations.find(
-      c => c.id === route.conversationId,
+      (candidate) => candidate.id === route.conversationId,
     );
     if (!conversation) return null; // effect navigates home
     return (
@@ -328,16 +298,16 @@ export function AppRoot() {
         conversation={conversation}
         users={users}
         identityUserId={identity.userId}
-        onBack={() => setRoute({ screen: 'list' })}
+        onBack={() => setRoute({ screen: "list" })}
         onChanged={() => {
           void session.refreshConversations();
         }}
-        onDeleted={() => setRoute({ screen: 'list' })}
+        onDeleted={() => setRoute({ screen: "list" })}
       />
     );
   }
 
-  if (route.screen === 'list') {
+  if (route.screen === "list") {
     return (
       <View style={styles.root}>
         <ConversationListScreen
@@ -348,23 +318,23 @@ export function AppRoot() {
           identityUserId={identity.userId}
           identityDisplayName={identityUser?.displayName ?? identity.userId}
           loading={!session.conversationsLoaded}
-          onOpen={conversationId => {
-            const conv = session.conversations.find(
-              c => c.id === conversationId,
+          onOpen={(conversationId) => {
+            const conversation = session.conversations.find(
+              (candidate) => candidate.id === conversationId,
             );
             void session.openConversation(conversationId);
             setRoute({
-              screen: 'chat',
+              screen: "chat",
               conversationId,
-              title: conversationTitle(conv, users, identity.userId),
+              title: conversationTitle(conversation, users, identity.userId),
               subtitle:
-                conv && conv.type === 'GROUP'
-                  ? `${conv.members?.length ?? 0} members`
+                conversation && conversation.type === "GROUP"
+                  ? `${conversation.members?.length ?? 0} members`
                   : null,
-              isGroup: conv?.type === 'GROUP',
+              isGroup: conversation?.type === "GROUP",
             });
           }}
-          onNew={() => setRoute({ screen: 'new' })}
+          onNew={() => setRoute({ screen: "new" })}
           onProfile={() => setProfileOpen(true)}
         />
         <ProfileSheet
@@ -379,41 +349,38 @@ export function AppRoot() {
             // Identity state change tears the whole session down
             // (useChatSession cleanup) and starts a fresh one on pick.
             setIdentity(null);
-            setRoute({ screen: 'picker' });
+            setRoute({ screen: "picker" });
           }}
         />
       </View>
     );
   }
 
-  const activeConv = session.conversations.find(
-    c => c.id === route.conversationId,
+  const activeConversation = session.conversations.find(
+    (conversation) => conversation.id === route.conversationId,
   );
-  if (!activeConv) return null; // effect navigates home
+  if (!activeConversation) return null; // effect navigates home
 
   // Read receipts (§14): max lastReadSequence among OTHER members — my
   // message is "read" once any peer's watermark passes its sequence. (Plain
   // computation — hooks must not sit behind the early returns above.)
   let readWatermark = 0;
-  for (const m of activeConv.members ?? []) {
-    if (m.userId !== identity.userId && m.lastReadSequence > readWatermark) {
-      readWatermark = m.lastReadSequence;
+  for (const member of activeConversation.members ?? []) {
+    if (member.userId !== identity.userId && member.lastReadSequence > readWatermark) {
+      readWatermark = member.lastReadSequence;
     }
   }
 
   const peerId =
-    activeConv.members?.find(member => member.userId !== identity.userId)
-      ?.userId ?? '';
+    activeConversation.members?.find((member) => member.userId !== identity.userId)?.userId ?? "";
   const peerName =
-    users.find(user => user.id === peerId)?.displayName ??
-    activeConv.title ??
+    users.find((user) => user.id === peerId)?.displayName ??
+    activeConversation.title ??
     route.title;
   const avatarInitials = initialsFromDisplayName(
-    route.isGroup ? (activeConv.title ?? route.title) : peerName,
+    route.isGroup ? (activeConversation.title ?? route.title) : peerName,
   );
-  const avatarColorKey = route.isGroup
-    ? activeConv.id
-    : peerId || activeConv.id;
+  const avatarColorKey = route.isGroup ? activeConversation.id : peerId || activeConversation.id;
 
   return (
     <View style={styles.root}>
@@ -430,17 +397,13 @@ export function AppRoot() {
         isGroup={route.isGroup}
         readWatermark={readWatermark}
         hasMoreHistory={session.hasMoreByConv[route.conversationId] ?? false}
-        loadingEarlier={
-          session.loadingEarlierByConv[route.conversationId] ?? false
-        }
+        loadingEarlier={session.loadingEarlierByConv[route.conversationId] ?? false}
         loadingHistory={
           (session.loadingHistoryByConv[route.conversationId] ?? false) &&
           (session.messagesByConv[route.conversationId]?.length ?? 0) === 0
         }
         historyError={
-          session.messagesByConv[route.conversationId]?.length === 0
-            ? session.error
-            : null
+          session.messagesByConv[route.conversationId]?.length === 0 ? session.error : null
         }
         onLoadEarlier={() => {
           void session.loadOlderMessages(route.conversationId);
@@ -456,16 +419,11 @@ export function AppRoot() {
           edit: (messageId, content) => {
             void session.editMessage(route.conversationId, messageId, content);
           },
-          delete: messageId => {
+          delete: (messageId) => {
             void session.deleteMessage(route.conversationId, messageId);
           },
           react: (messageId, emoji, remove) => {
-            session.toggleReaction(
-              route.conversationId,
-              messageId,
-              emoji,
-              remove,
-            );
+            session.toggleReaction(route.conversationId, messageId, emoji, remove);
           },
           pickImage,
           pickDocument,
@@ -473,25 +431,15 @@ export function AppRoot() {
         onSend={(content, replyToId) => {
           void session.sendMessage(route.conversationId, content, replyToId);
         }}
-        onRetry={cmid => {
+        onRetry={(cmid) => {
           void session.retryMessage(cmid);
         }}
-        onBack={() => setRoute({ screen: 'list' })}
-        onTypingChange={isTyping =>
-          session.sendTyping(route.conversationId, isTyping)
-        }
-        onOpenDetails={() =>
-          setRoute({ screen: 'details', conversationId: route.conversationId })
-        }
+        onBack={() => setRoute({ screen: "list" })}
+        onTypingChange={(isTyping) => session.sendTyping(route.conversationId, isTyping)}
+        onOpenDetails={() => setRoute({ screen: "details", conversationId: route.conversationId })}
       />
       {uploading && (
-        <View
-          style={[
-            styles.uploadOverlay,
-            elevation.floating,
-            { bottom: 96 + insets.bottom },
-          ]}
-        >
+        <View style={[styles.uploadOverlay, elevation.floating, { bottom: 96 + insets.bottom }]}>
           <ActivityIndicator color={colors.primaryStrong} size="small" />
           <Text style={styles.uploadText}>Uploading…</Text>
         </View>
@@ -501,19 +449,17 @@ export function AppRoot() {
 }
 
 // Small alert helpers keep the flows readable (product copy, never raw errors).
-const AlertTooLarge = (): void =>
-  Alert.alert('File too large', 'Maximum upload size is 50 MB.');
+const AlertTooLarge = (): void => Alert.alert("File too large", "Maximum upload size is 50 MB.");
 const AlertUploadFailed = (message: string): void =>
-  Alert.alert('Upload failed', message, [{ text: 'OK' }]);
-const AlertUnsupported = (message: string): void =>
-  Alert.alert('Unsupported image', message);
+  Alert.alert("Upload failed", message, [{ text: "OK" }]);
+const AlertUnsupported = (message: string): void => Alert.alert("Unsupported image", message);
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.background },
   center: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: colors.background,
     gap: spacing.sm,
   },
@@ -522,7 +468,7 @@ const styles = StyleSheet.create({
   errorBody: {
     color: colors.textSecondary,
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
   },
   retryBtn: {
     marginTop: spacing.md,
@@ -531,13 +477,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
   },
-  retryText: { color: colors.onPrimary, fontWeight: '700' },
+  retryText: { color: colors.onPrimary, fontWeight: "700" },
   uploadOverlay: {
-    position: 'absolute',
-    alignSelf: 'center',
-    flexDirection: 'row',
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
     gap: spacing.sm,
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.surfaceRaised,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
@@ -545,5 +491,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderStrong,
   },
-  uploadText: { color: colors.textSecondary, fontSize: 13, fontWeight: '500' },
+  uploadText: { color: colors.textSecondary, fontSize: 13, fontWeight: "500" },
 });
