@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { EventEnvelope } from "@mqtt-chat/mqtt-contracts";
 import type { ApiConversation } from "@/lib/api";
+import { applyCanonicalReadReceipt } from "@/lib/canonical-events";
 import { useChatStore } from "@/store/chat-store";
-import { handleEvent } from "./page";
 
 const conversation: ApiConversation = {
   id: "conv-read",
@@ -44,7 +44,7 @@ describe("web canonical receipt routing", () => {
   });
 
   it("applies a self-user receipt emitted by another device", () => {
-    handleEvent(readEvent(8));
+    applyCanonicalReadReceipt(readEvent(8));
 
     const ownMember = useChatStore
       .getState()
@@ -53,8 +53,8 @@ describe("web canonical receipt routing", () => {
   });
 
   it("does not regress the watermark on an out-of-order self receipt", () => {
-    handleEvent(readEvent(8));
-    handleEvent(readEvent(4));
+    applyCanonicalReadReceipt(readEvent(8));
+    applyCanonicalReadReceipt(readEvent(4));
 
     const ownMember = useChatStore
       .getState()

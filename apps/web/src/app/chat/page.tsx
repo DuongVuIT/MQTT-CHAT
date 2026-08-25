@@ -7,6 +7,7 @@ import { normalizeConversation, normalizeMessage } from "@mqtt-chat/realtime-cor
 import { getRealtimeService, type ConnectionState } from "@/lib/realtime-service";
 import { republishPayload, useChatStore } from "@/store/chat-store";
 import { loadStoredIdentity } from "@/lib/identity";
+import { applyCanonicalReadReceipt } from "@/lib/canonical-events";
 import { Sidebar } from "@/components/Sidebar";
 import { MessageList } from "@/components/MessageList";
 import { Composer } from "@/components/Composer";
@@ -313,7 +314,7 @@ function flushQueuedMessages(): void {
 }
 
 /** Route canonical events into the store. */
-export function handleEvent(envelope: EventEnvelope): void {
+function handleEvent(envelope: EventEnvelope): void {
   const s = useChatStore.getState();
   // Perspective is ALWAYS derived from the active identity at event time.
   const selfUserId = s.identity?.userId ?? "";
@@ -479,7 +480,7 @@ export function handleEvent(envelope: EventEnvelope): void {
       // Apply the canonical self event too: the worker fans it back so this
       // user's other tabs/devices converge. The monotonic reducer makes the
       // optimistic local echo and QoS1 redelivery harmless.
-      s.applyReadReceipt(conversationId, String(data["userId"]), Number(data["lastReadSequence"]));
+      applyCanonicalReadReceipt(envelope);
       break;
     }
     case "typing.started":
