@@ -52,17 +52,19 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 900 });
   await page.goto(`${BASE}/`, { waitUntil: "networkidle2" });
+  // Snapshot pre-existing client ids BEFORE this probe picks an identity —
+  // the operator's own tabs / the simulator may hold legitimate live sessions
+  // for the same users (documented non-leak). Every later per-user assertion
+  // judges only clients THIS probe created.
+  const baselineIds = mqttClients().map((c) => c.id);
   await page.evaluate(() => {
     document.querySelector('button[data-user-id="duong"]')?.click();
   });
   await sleep(3500);
 
-  const baseline = forUser(mqttClients(), "duong:");
-  check(baseline.length === 1, "exactly ONE broker client for duong", JSON.stringify(baseline));
+  const baseline = forUser(mqttClients(), "duong:").filter((c) => !baselineIds.includes(c.id));
+  check(baseline.length === 1, "exactly ONE NEW broker client for duong (probe's own)", JSON.stringify(baseline));
   const baseSubs = baseline[0]?.subs ?? -1;
-  // Snapshot pre-existing client ids so later per-user assertions can
-  // distinguish THIS probe's session from the operator's own tabs.
-  const baselineIds = mqttClients().map((c) => c.id);
   check(baseSubs >= 2, "global + user topic subscribed", `subs=${baseSubs}`);
 
   // Churn: open conversations A/B/A rapidly.
@@ -79,7 +81,9 @@ try {
   await openConv(2);
   await openConv(0);
 
-  const afterChurn = forUser(mqttClients(), "duong:");
+  // Only THIS probe's duong session — pre-existing tabs (baselineIds) are
+  // legitimate separate clients, not leaks.
+  const afterChurn = forUser(mqttClients(), "duong:").filter((c) => !baselineIds.includes(c.id));
   check(
     afterChurn.length === 1 && afterChurn[0]?.subs === baseSubs,
     "subscription count STABLE after conversation churn",
@@ -93,7 +97,7 @@ try {
     document.querySelector('button[data-user-id="alice"]')?.click();
   });
   await sleep(3500);
-  const midClients = mqttClients().filter((c) => c.id.startsWith("duong:"));
+  const midClients = mqttClients().filter((c) => c.id.startsWith("duong:") && !baselineIds.includes(c.id));
   check(
     midClients.length === 0 || midClients.every((c) => !c.connected),
     "duong client GONE after identity switch",
