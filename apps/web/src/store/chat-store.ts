@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ApiConversation, ApiMessage, ApiUser } from "@/lib/api";
 import type { ConnectionState } from "@/lib/realtime-service";
+import { advanceMemberWatermark } from "@mqtt-chat/realtime-core";
 
 /**
  * Client chat state (zustand). Server remains the authority — this store is a
@@ -446,18 +447,15 @@ export const useChatStore = create<ChatState>((set) => ({
 
   applyReadReceipt: (conversationId, userId, lastReadSequence) =>
     set((s) => ({
-      conversations: s.conversations.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              // Defensive: a conversation payload missing `members` (stale or
-              // incomplete API response) must not crash the event handler.
-              members: (c.members ?? []).map((m) =>
-                m.userId === userId ? { ...m, lastReadSequence } : m,
-              ),
-            }
-          : c,
-      ),
+      conversations: s.conversations.map((c) => {
+        if (c.id !== conversationId) return c;
+        // Shared monotonic merge (REG-02): advances only forward, so a QoS1
+        // redelivery or out-of-order event can never move the watermark —
+        // and therefore the unread badge — backwards. Also used to advance
+        // OUR OWN watermark right after publishing a read receipt.
+        const members = advanceMemberWatermark(c.members, userId, lastReadSequence);
+        return members ? { ...c, members } : c;
+      }),
     })),
 
   setConnectionState: (connectionState) => set({ connectionState }),

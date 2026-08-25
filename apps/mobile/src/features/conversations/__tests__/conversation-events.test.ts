@@ -1,6 +1,7 @@
 import {
   applyConversationEvent,
   applyMessageActivity,
+  applyReadReceipt,
   applyReactionEvent,
   sortByActivity,
 } from '../conversation-events';
@@ -273,5 +274,115 @@ describe('applyReactionEvent — cross-client reactions in realtime', () => {
         messageId: 'missing',
       }),
     ).toBe(list);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// REG-02 (2026-08-25): canonical read receipts. The mobile handler had NO
+// receipt.read case at all, and neither client advanced its own watermark
+// after publishing — unread badges only healed on the next refetch, and
+// cross-device read convergence never happened.
+// ---------------------------------------------------------------------------
+
+describe('applyReadReceipt — canonical read state', () => {
+  const base = [
+    conv('c1', {
+      lastSequence: 10,
+      members: [
+        { userId: 'user-me', role: 'MEMBER', lastReadSequence: 4 },
+        { userId: 'user-peer', role: 'MEMBER', lastReadSequence: 2 },
+      ],
+    }),
+    conv('c2'),
+  ];
+
+  it('advances MY watermark → my unread badge (lastSequence − myRead) drops', () => {
+    const next = applyReadReceipt(base, {
+      conversationId: 'c1',
+      userId: 'user-me',
+      lastReadSequence: 9,
+    });
+    const mine = next
+      .find(c => c.id === 'c1')!
+      .members.find(m => m.userId === 'user-me')!;
+    expect(mine.lastReadSequence).toBe(9);
+    expect(10 - mine.lastReadSequence).toBe(1); // one message left unread
+  });
+
+  it("advances a PEER's watermark → their ✓✓ ticks move live", () => {
+    const next = applyReadReceipt(base, {
+      conversationId: 'c1',
+      userId: 'user-peer',
+      lastReadSequence: 8,
+    });
+    const peer = next
+      .find(c => c.id === 'c1')!
+      .members.find(m => m.userId === 'user-peer')!;
+    expect(peer.lastReadSequence).toBe(8);
+    // My own watermark untouched by peer receipts.
+    expect(
+      next.find(c => c.id === 'c1')!.members.find(m => m.userId === 'user-me')!
+        .lastReadSequence,
+    ).toBe(4);
+  });
+
+  it('is idempotent under QoS1 redelivery (same reference when stale)', () => {
+    const once = applyReadReceipt(base, {
+      conversationId: 'c1',
+      userId: 'user-me',
+      lastReadSequence: 6,
+    });
+    expect(
+      applyReadReceipt(once, {
+        conversationId: 'c1',
+        userId: 'user-me',
+        lastReadSequence: 6,
+      }),
+    ).toBe(once);
+  });
+
+  it('NEVER regresses on out-of-order receipts', () => {
+    const advanced = applyReadReceipt(base, {
+      conversationId: 'c1',
+      userId: 'user-me',
+      lastReadSequence: 9,
+    });
+    const regressed = applyReadReceipt(advanced, {
+      conversationId: 'c1',
+      userId: 'user-me',
+      lastReadSequence: 5,
+    });
+    expect(regressed).toBe(advanced); // no-op — same reference
+    expect(
+      regressed
+        .find(c => c.id === 'c1')!
+        .members.find(m => m.userId === 'user-me')!.lastReadSequence,
+    ).toBe(9);
+  });
+
+  it('unknown conversation or member leaves the list untouched', () => {
+    expect(
+      applyReadReceipt(base, {
+        conversationId: 'missing',
+        userId: 'user-me',
+        lastReadSequence: 5,
+      }),
+    ).toBe(base);
+    expect(
+      applyReadReceipt(base, {
+        conversationId: 'c1',
+        userId: 'stranger',
+        lastReadSequence: 5,
+      }),
+    ).toBe(base);
+  });
+
+  it('other conversations in the list keep their references', () => {
+    const next = applyReadReceipt(base, {
+      conversationId: 'c1',
+      userId: 'user-me',
+      lastReadSequence: 7,
+    });
+    expect(next[1]).toBe(base[1]);
   });
 });

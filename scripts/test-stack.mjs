@@ -273,6 +273,10 @@ const SUITES = [
   // Full GROUP lifecycle: create → permission model → admin tombstone delete
   // → canonical conversation.deleted to every member → post-delete rejects.
   "scripts/group-lifecycle-e2e.mts",
+  // REG-02 (2026-08-25): cross-device receipt convergence — a reader's SECOND
+  // device must receive receipt.read, the watermark must persist via REST,
+  // and stale receipts must never regress it.
+  "scripts/receipt-convergence-e2e.mts",
 ];
 
 /** .mts suites are TypeScript — run them through tsx. */

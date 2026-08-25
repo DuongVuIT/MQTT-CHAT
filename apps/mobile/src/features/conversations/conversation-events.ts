@@ -11,7 +11,10 @@
  * never append blindly (duplicate-key regression class).
  */
 
-import { normalizeConversation } from '@mqtt-chat/realtime-core';
+import {
+  advanceMemberWatermark,
+  normalizeConversation,
+} from '@mqtt-chat/realtime-core';
 import type { ApiConversation, ApiMessage } from '../../lib/api';
 
 export type ConversationEventTypeName =
@@ -127,6 +130,37 @@ export function applyMessageActivity(
     };
   });
   return sortByActivity(updated);
+}
+
+/**
+ * Apply a canonical receipt.read event to the conversation list — REG-02.
+ *
+ * Advances ONE member's lastReadSequence watermark through the shared
+ * monotonic merge from @mqtt-chat/realtime-core:
+ *  - the READER's own watermark → the unread badge (`lastSequence − myRead`)
+ *    clears on every device of that user;
+ *  - OTHER members' watermarks → ✓✓ read ticks advance live in transcripts.
+ * Stale/duplicate QoS1 deliveries are no-ops (watermark never regresses).
+ *
+ * @returns next list; identical reference when nothing changed
+ */
+export function applyReadReceipt(
+  list: ApiConversation[],
+  input: { conversationId: string; userId: string; lastReadSequence: number },
+): ApiConversation[] {
+  let changed = false;
+  const next = list.map(c => {
+    if (c.id !== input.conversationId) return c;
+    const members = advanceMemberWatermark(
+      c.members,
+      input.userId,
+      input.lastReadSequence,
+    );
+    if (!members) return c;
+    changed = true;
+    return { ...c, members };
+  });
+  return changed ? next : list;
 }
 
 /** Most recently active conversation first (creation order is meaningless). */

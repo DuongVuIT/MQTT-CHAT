@@ -36,9 +36,14 @@ export async function handleReceiptRead(
   });
   await ctx.unread.reset(userId, data.conversationId).catch(() => undefined);
 
-  // Notify other members (esp. the sender) via per-user topics.
-  const others = await ctx.db.conversationMember.findMany({
-    where: { conversationId: data.conversationId, userId: { not: userId } },
+  // Fan out to EVERY member — including the reader. Other members learn
+  // their message was seen; the reader's OTHER devices/subscriptions learn
+  // their own watermark advanced so every device of the same user converges
+  // on unread=0 without a refetch (REG-02 cross-device). Clients merge via
+  // the shared monotonic watermark helper, so delivering the reader's own
+  // event back is idempotent and cannot regress their local state.
+  const recipients = await ctx.db.conversationMember.findMany({
+    where: { conversationId: data.conversationId },
     select: { userId: true },
   });
 
@@ -56,7 +61,7 @@ export async function handleReceiptRead(
   });
 
   await Promise.all(
-    others.map((m) =>
+    recipients.map((m) =>
       ctx.db.outboxEvent.create({
         data: {
           eventType: "receipt.read",

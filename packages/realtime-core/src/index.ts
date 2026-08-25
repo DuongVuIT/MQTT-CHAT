@@ -496,3 +496,7 @@ export class ChatRealtimeClient {
     return this.publish("presence.set", COMMAND_TOPICS.presenceSet, { isOnline }, MQTT_QOS.command);
   }
 }
+
+// ---- Canonical client-side helpers shared by web + mobile -----------------
+// Monotonic read-watermark merge both reducers must go through.
+export * from "./read-watermark";

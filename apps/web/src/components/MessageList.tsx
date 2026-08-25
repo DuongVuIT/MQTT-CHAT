@@ -244,6 +244,11 @@ export function MessageList({
       conversationId,
       lastReadSequence: lastSeq,
     });
+    // Advance OUR OWN watermark locally — the server only echoes receipt.read
+    // to members' user topics for cross-device convergence; without this the
+    // sidebar badge derived from `lastSequence − myRead` stayed stale until
+    // the next refetch (REG-02). Monotonic via the shared merge.
+    useChatStore.getState().applyReadReceipt(conversationId, identity.userId, lastSeq);
   }, [conversationId, identity, messages]);
 
   const scrollToLatest = (behavior: ScrollBehavior): void => {

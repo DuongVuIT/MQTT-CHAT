@@ -436,3 +436,74 @@ describe("republishPayload — retry/flush payload fidelity", () => {
     expect(text.content).toBe("plain text");
   });
 });
+
+// ---------------------------------------------------------------------------
+// REG-02 (2026-08-25): read receipts must merge MONOTONICALLY and the client
+// must advance its OWN watermark when it reads — otherwise the sidebar
+// unread badge (`lastSequence − myRead`) stayed stale until the next refetch.
+// ---------------------------------------------------------------------------
+
+const conversationWithWatermarks = (watermarks: Record<string, number>): ApiConversation => ({
+  id: "conv-general",
+  type: "GROUP",
+  title: "General",
+  memberCount: Object.keys(watermarks).length,
+  lastSequence: 10,
+  lastMessagePreview: null,
+  lastMessageAt: new Date().toISOString(),
+  members: Object.entries(watermarks).map(([userId, lastReadSequence]) => ({
+    userId,
+    role: "MEMBER" as const,
+    lastReadSequence,
+  })),
+});
+
+describe("chat-store applyReadReceipt (canonical read state)", () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      conversations: [
+        conversationWithWatermarks({ duong: 4, alice: 2 }),
+        conversationWithWatermarks({ bob: 0 }),
+      ],
+      messagesByConversation: {},
+      pendingMessages: [],
+    });
+  });
+
+  it("advances MY watermark so the unread badge clears immediately", () => {
+    useChatStore.getState().applyReadReceipt("conv-general", "duong", 9);
+    const me = useChatStore.getState().conversations[0]?.members?.find((m) => m.userId === "duong");
+    expect(me?.lastReadSequence).toBe(9);
+    expect(10 - (me?.lastReadSequence ?? 0)).toBe(1);
+  });
+
+  it("advances a PEER watermark for ✓✓ ticks without touching mine", () => {
+    useChatStore.getState().applyReadReceipt("conv-general", "alice", 8);
+    const conv = useChatStore.getState().conversations[0];
+    expect(conv?.members?.find((m) => m.userId === "alice")?.lastReadSequence).toBe(8);
+    expect(conv?.members?.find((m) => m.userId === "duong")?.lastReadSequence).toBe(4);
+  });
+
+  it("never regresses on QoS1 redelivery or out-of-order events", () => {
+    useChatStore.getState().applyReadReceipt("conv-general", "duong", 9);
+    useChatStore.getState().applyReadReceipt("conv-general", "duong", 3);
+    const me = useChatStore.getState().conversations[0]?.members?.find((m) => m.userId === "duong");
+    expect(me?.lastReadSequence).toBe(9);
+  });
+
+  it("tolerates a conversation payload missing members (defensive)", () => {
+    useChatStore.setState({
+      conversations: [
+        {
+          ...conversationWithWatermarks({ duong: 4 }),
+          members: undefined,
+        } as unknown as ApiConversation,
+      ],
+      messagesByConversation: {},
+      pendingMessages: [],
+    });
+    expect(() =>
+      useChatStore.getState().applyReadReceipt("conv-general", "duong", 6),
+    ).not.toThrow();
+  });
+});
