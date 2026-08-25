@@ -1,4 +1,4 @@
-import { toPrismaJson } from "@mqtt-chat/database";
+import { Prisma, toPrismaJson } from "@mqtt-chat/database";
 import {
   buildEventEnvelope,
   EVENT_TOPICS,
@@ -26,24 +26,6 @@ export async function handleReactionAdd(
   });
   if (!membership) return;
 
-  // Idempotent upsert (composite PK messageId+userId+emoji).
-  await ctx.db.messageReaction.upsert({
-    where: {
-      messageId_userId_emoji: {
-        messageId: data.messageId,
-        userId,
-        emoji: data.emoji,
-      },
-    },
-    update: {},
-    create: {
-      messageId: data.messageId,
-      userId,
-      emoji: data.emoji,
-      conversationId: data.conversationId,
-    },
-  });
-
   const event = buildEventEnvelope({
     eventType: "reaction.added",
     origin: { type: "user", id: userId },
@@ -59,15 +41,34 @@ export async function handleReactionAdd(
     },
   });
 
-  await ctx.db.outboxEvent.create({
-    data: {
-      eventType: "reaction.added",
-      aggregateType: "Message",
-      aggregateId: data.messageId,
-      topic: EVENT_TOPICS.reactionAdded,
-      payload: toPrismaJson(event),
-    },
-  });
+  try {
+    await ctx.db.$transaction(async (tx) => {
+      // Create (not upsert) lets the composite PK distinguish a real state
+      // transition from a QoS1 duplicate. Only the transition gets an event.
+      await tx.messageReaction.create({
+        data: {
+          messageId: data.messageId,
+          userId,
+          emoji: data.emoji,
+          conversationId: data.conversationId,
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          eventType: "reaction.added",
+          aggregateType: "Message",
+          aggregateId: data.messageId,
+          topic: EVENT_TOPICS.reactionAdded,
+          payload: toPrismaJson(event),
+        },
+      });
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function handleReactionRemove(
@@ -78,14 +79,10 @@ export async function handleReactionRemove(
   const userId = envelope.actor.userId;
   if (!userId) return;
 
-  const existing = await ctx.db.messageReaction.findUnique({
-    where: { messageId_userId_emoji: { messageId: data.messageId, userId, emoji: data.emoji } },
+  const membership = await ctx.db.conversationMember.findUnique({
+    where: { conversationId_userId: { conversationId: data.conversationId, userId } },
   });
-  if (!existing) return; // idempotent
-
-  await ctx.db.messageReaction.delete({
-    where: { messageId_userId_emoji: { messageId: data.messageId, userId, emoji: data.emoji } },
-  });
+  if (!membership) return;
 
   const event = buildEventEnvelope({
     eventType: "reaction.removed",
@@ -102,13 +99,24 @@ export async function handleReactionRemove(
     },
   });
 
-  await ctx.db.outboxEvent.create({
-    data: {
-      eventType: "reaction.removed",
-      aggregateType: "Message",
-      aggregateId: data.messageId,
-      topic: EVENT_TOPICS.reactionRemoved,
-      payload: toPrismaJson(event),
-    },
+  await ctx.db.$transaction(async (tx) => {
+    const removed = await tx.messageReaction.deleteMany({
+      where: {
+        messageId: data.messageId,
+        userId,
+        emoji: data.emoji,
+        conversationId: data.conversationId,
+      },
+    });
+    if (removed.count === 0) return;
+    await tx.outboxEvent.create({
+      data: {
+        eventType: "reaction.removed",
+        aggregateType: "Message",
+        aggregateId: data.messageId,
+        topic: EVENT_TOPICS.reactionRemoved,
+        payload: toPrismaJson(event),
+      },
+    });
   });
 }

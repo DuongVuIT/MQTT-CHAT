@@ -100,6 +100,14 @@ export const receiptReadDataSchema = z.object({
 export type ReceiptReadData = z.infer<typeof receiptReadDataSchema>;
 export type ReceiptReadEvent = EventEnvelope<ReceiptReadData>;
 
+export const receiptDeliveredDataSchema = z.object({
+  conversationId: z.string().min(1),
+  userId: z.string().min(1),
+  lastDeliveredSequence: z.number().int().positive(),
+});
+export type ReceiptDeliveredData = z.infer<typeof receiptDeliveredDataSchema>;
+export type ReceiptDeliveredEvent = EventEnvelope<ReceiptDeliveredData>;
+
 export const typingEventDataSchema = z.object({
   conversationId: z.string().min(1),
   userId: z.string().min(1),
@@ -178,6 +186,7 @@ export const EVENT_SCHEMAS = {
   "reaction.added": reactionAddedDataSchema,
   "reaction.removed": reactionRemovedDataSchema,
   "receipt.read": receiptReadDataSchema,
+  "receipt.delivered": receiptDeliveredDataSchema,
   "typing.started": typingEventDataSchema,
   "typing.stopped": typingEventDataSchema,
   "presence.online": presenceEventDataSchema,

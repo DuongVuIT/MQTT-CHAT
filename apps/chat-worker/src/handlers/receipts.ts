@@ -23,56 +23,67 @@ export async function handleReceiptRead(
   const userId = envelope.actor.userId;
   if (!userId) return;
 
-  const membership = await ctx.db.conversationMember.findUnique({
-    where: { conversationId_userId: { conversationId: data.conversationId, userId } },
-  });
-  if (!membership) return;
+  const advanced = await ctx.db.$transaction(async (tx) => {
+    const membership = await tx.conversationMember.findUnique({
+      where: { conversationId_userId: { conversationId: data.conversationId, userId } },
+      include: { conversation: { select: { lastSequence: true } } },
+    });
+    if (!membership) return false;
 
-  if (data.lastReadSequence <= membership.lastReadSequence) return; // stale/out-of-order — idempotent
+    // A client cannot read messages that do not exist. Clamping at the
+    // authority prevents a malformed/hostile command from moving the
+    // watermark beyond lastSequence and suppressing future unread counts.
+    const acceptedSequence = Math.min(data.lastReadSequence, membership.conversation.lastSequence);
+    if (acceptedSequence <= membership.lastReadSequence) return false;
 
-  await ctx.db.conversationMember.update({
-    where: { conversationId_userId: { conversationId: data.conversationId, userId } },
-    data: { lastReadSequence: data.lastReadSequence },
-  });
-  await ctx.unread.reset(userId, data.conversationId).catch(() => undefined);
+    // Compare-and-advance inside the transaction. Two devices can publish
+    // different watermarks concurrently; a stale update must never win the
+    // last writer race and move persisted state backwards.
+    const update = await tx.conversationMember.updateMany({
+      where: {
+        conversationId: data.conversationId,
+        userId,
+        lastReadSequence: { lt: acceptedSequence },
+      },
+      data: { lastReadSequence: acceptedSequence },
+    });
+    if (update.count === 0) return false;
 
-  // Fan out to EVERY member — including the reader. Other members learn
-  // their message was seen; the reader's OTHER devices/subscriptions learn
-  // their own watermark advanced so every device of the same user converges
-  // on unread=0 without a refetch (REG-02 cross-device). Clients merge via
-  // the shared monotonic watermark helper, so delivering the reader's own
-  // event back is idempotent and cannot regress their local state.
-  const recipients = await ctx.db.conversationMember.findMany({
-    where: { conversationId: data.conversationId },
-    select: { userId: true },
-  });
-
-  const event = buildEventEnvelope({
-    eventType: "receipt.read",
-    origin: { type: "user", id: userId },
-    actor: { userId, deviceId: envelope.actor.deviceId },
-    conversationId: data.conversationId,
-    correlationId: envelope.correlationId,
-    data: {
+    // Fan out to EVERY member — including the reader. Persistence and every
+    // outbox row commit atomically, so a crash can never leave a durable read
+    // watermark without the canonical events needed for client convergence.
+    const recipients = await tx.conversationMember.findMany({
+      where: { conversationId: data.conversationId },
+      select: { userId: true },
+    });
+    const event = buildEventEnvelope({
+      eventType: "receipt.read",
+      origin: { type: "user", id: userId },
+      actor: { userId, deviceId: envelope.actor.deviceId },
       conversationId: data.conversationId,
-      userId,
-      lastReadSequence: data.lastReadSequence,
-    },
+      correlationId: envelope.correlationId,
+      data: {
+        conversationId: data.conversationId,
+        userId,
+        lastReadSequence: acceptedSequence,
+      },
+    });
+    await tx.outboxEvent.createMany({
+      data: recipients.map((recipient) => ({
+        eventType: "receipt.read",
+        aggregateType: "ConversationMember",
+        aggregateId: `${data.conversationId}:${recipient.userId}`,
+        topic: userEventTopic(recipient.userId, "receipt/read"),
+        payload: toPrismaJson(event),
+      })),
+    });
+    return true;
   });
 
-  await Promise.all(
-    recipients.map((m) =>
-      ctx.db.outboxEvent.create({
-        data: {
-          eventType: "receipt.read",
-          aggregateType: "ConversationMember",
-          aggregateId: `${data.conversationId}:${m.userId}`,
-          topic: userEventTopic(m.userId, "receipt/read"),
-          payload: toPrismaJson(event),
-        },
-      }),
-    ),
-  );
+  if (advanced) {
+    // Redis is a derived acceleration structure; PostgreSQL is authoritative.
+    await ctx.unread.reset(userId, data.conversationId).catch(() => undefined);
+  }
 }
 
 export async function handleReceiptDelivered(
@@ -83,46 +94,52 @@ export async function handleReceiptDelivered(
   const userId = envelope.actor.userId;
   if (!userId) return;
 
-  const membership = await ctx.db.conversationMember.findUnique({
-    where: { conversationId_userId: { conversationId: data.conversationId, userId } },
-  });
-  if (!membership) return;
-  if (data.lastDeliveredSequence <= membership.lastDeliveredSequence) return; // idempotent
+  await ctx.db.$transaction(async (tx) => {
+    const membership = await tx.conversationMember.findUnique({
+      where: { conversationId_userId: { conversationId: data.conversationId, userId } },
+      include: { conversation: { select: { lastSequence: true } } },
+    });
+    if (!membership) return;
+    const acceptedSequence = Math.min(
+      data.lastDeliveredSequence,
+      membership.conversation.lastSequence,
+    );
+    if (acceptedSequence <= membership.lastDeliveredSequence) return;
 
-  await ctx.db.conversationMember.update({
-    where: { conversationId_userId: { conversationId: data.conversationId, userId } },
-    data: { lastDeliveredSequence: data.lastDeliveredSequence },
-  });
+    const update = await tx.conversationMember.updateMany({
+      where: {
+        conversationId: data.conversationId,
+        userId,
+        lastDeliveredSequence: { lt: acceptedSequence },
+      },
+      data: { lastDeliveredSequence: acceptedSequence },
+    });
+    if (update.count === 0) return;
 
-  const others = await ctx.db.conversationMember.findMany({
-    where: { conversationId: data.conversationId, userId: { not: userId } },
-    select: { userId: true },
-  });
-
-  const event = buildEventEnvelope({
-    eventType: "receipt.delivered",
-    origin: { type: "user", id: userId },
-    actor: { userId, deviceId: envelope.actor.deviceId },
-    conversationId: data.conversationId,
-    correlationId: envelope.correlationId,
-    data: {
+    const others = await tx.conversationMember.findMany({
+      where: { conversationId: data.conversationId, userId: { not: userId } },
+      select: { userId: true },
+    });
+    const event = buildEventEnvelope({
+      eventType: "receipt.delivered",
+      origin: { type: "user", id: userId },
+      actor: { userId, deviceId: envelope.actor.deviceId },
       conversationId: data.conversationId,
-      userId,
-      lastDeliveredSequence: data.lastDeliveredSequence,
-    },
+      correlationId: envelope.correlationId,
+      data: {
+        conversationId: data.conversationId,
+        userId,
+        lastDeliveredSequence: acceptedSequence,
+      },
+    });
+    await tx.outboxEvent.createMany({
+      data: others.map((recipient) => ({
+        eventType: "receipt.delivered",
+        aggregateType: "ConversationMember",
+        aggregateId: `${data.conversationId}:${recipient.userId}`,
+        topic: userEventTopic(recipient.userId, "receipt/delivered"),
+        payload: toPrismaJson(event),
+      })),
+    });
   });
-
-  await Promise.all(
-    others.map((m) =>
-      ctx.db.outboxEvent.create({
-        data: {
-          eventType: "receipt.delivered",
-          aggregateType: "ConversationMember",
-          aggregateId: `${data.conversationId}:${m.userId}`,
-          topic: userEventTopic(m.userId, "receipt/delivered"),
-          payload: toPrismaJson(event),
-        },
-      }),
-    ),
-  );
 }

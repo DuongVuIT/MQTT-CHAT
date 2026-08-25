@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { commandEnvelopeSchema, eventEnvelopeSchema } from "./envelope.js";
+import { receiptDeliveredDataSchema } from "./events.js";
 
 const validEvent = {
   eventId: "e1",
@@ -51,5 +52,21 @@ describe("commandEnvelopeSchema", () => {
         data: {},
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("receiptDeliveredDataSchema", () => {
+  it("validates the payload emitted by chat-worker", () => {
+    expect(
+      receiptDeliveredDataSchema.parse({
+        conversationId: "conv-1",
+        userId: "alice",
+        lastDeliveredSequence: 4,
+      }),
+    ).toEqual({
+      conversationId: "conv-1",
+      userId: "alice",
+      lastDeliveredSequence: 4,
+    });
   });
 });

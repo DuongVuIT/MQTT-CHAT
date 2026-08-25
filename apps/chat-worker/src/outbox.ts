@@ -1,4 +1,4 @@
-import type { PrismaClient, OutboxEvent } from "@mqtt-chat/database";
+import type { Prisma, PrismaClient, OutboxEvent } from "@mqtt-chat/database";
 import { publishJson } from "@mqtt-chat/mqtt";
 import type { MqttClient } from "@mqtt-chat/mqtt";
 import type { Logger } from "@mqtt-chat/logger";
@@ -20,6 +20,7 @@ export class OutboxPublisher {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private stopped = false;
+  private inFlight: Promise<number> | null = null;
 
   constructor(
     private readonly db: PrismaClient,
@@ -35,7 +36,8 @@ export class OutboxPublisher {
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
-    // Drain one final pass so in-flight work completes on shutdown.
+    // Never overlap the shutdown drain with an active poll.
+    if (this.inFlight) await this.inFlight;
     await this.processBatch();
     this.log.info("Outbox publisher stopped");
   }
@@ -54,7 +56,8 @@ export class OutboxPublisher {
     }
     this.running = true;
     try {
-      const processed = await this.processBatch();
+      this.inFlight = this.processBatch();
+      const processed = await this.inFlight;
       this.scheduleNext(processed >= BATCH_SIZE ? 0 : POLL_INTERVAL_MS);
     } catch (error) {
       this.log.error("Outbox publisher tick failed", {
@@ -62,36 +65,45 @@ export class OutboxPublisher {
       });
       this.scheduleNext(POLL_INTERVAL_MS * 2);
     } finally {
+      this.inFlight = null;
       this.running = false;
     }
   }
 
   /** Returns the number of events processed. */
   async processBatch(): Promise<number> {
-    const events = await this.db.$queryRaw<OutboxEvent[]>`
-      SELECT * FROM "OutboxEvent"
-      WHERE "publishedAt" IS NULL AND "attemptCount" < ${MAX_ATTEMPTS}
-      ORDER BY "createdAt" ASC
-      LIMIT ${BATCH_SIZE}
-      FOR UPDATE SKIP LOCKED
-    `;
-    for (const event of events) {
-      await this.publishOne(event);
-    }
-    return events.length;
+    // The row locks only have meaning inside an explicit transaction. The
+    // previous standalone SELECT released them before MQTT publish, allowing
+    // two worker replicas to select and publish the same batch concurrently.
+    // A crash after broker ACK and before commit can still redeliver (the
+    // documented at-least-once boundary), but live replicas no longer race.
+    return this.db.$transaction(
+      async (tx) => {
+        const events = await tx.$queryRaw<OutboxEvent[]>`
+          SELECT * FROM "OutboxEvent"
+          WHERE "publishedAt" IS NULL AND "attemptCount" < ${MAX_ATTEMPTS}
+          ORDER BY "createdAt" ASC
+          LIMIT ${BATCH_SIZE}
+          FOR UPDATE SKIP LOCKED
+        `;
+        for (const event of events) await this.publishOne(tx, event);
+        return events.length;
+      },
+      { timeout: 60_000 },
+    );
   }
 
-  private async publishOne(event: OutboxEvent): Promise<void> {
+  private async publishOne(db: Prisma.TransactionClient, event: OutboxEvent): Promise<void> {
     try {
       await publishJson(this.mqtt, event.topic, event.payload, 1);
-      await this.db.outboxEvent.update({
+      await db.outboxEvent.update({
         where: { id: event.id },
         data: { publishedAt: new Date(), lastError: null },
       });
       this.log.debug("Outbox event published", { eventId: event.id, eventType: event.eventType });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.db.outboxEvent
+      await db.outboxEvent
         .update({
           where: { id: event.id },
           data: { attemptCount: { increment: 1 }, lastError: message },
