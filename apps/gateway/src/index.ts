@@ -101,14 +101,30 @@ server.listen(PORT, () => {
 // Graceful shutdown (AGENTS invariant #15): stop accepting new work, give
 // in-flight HTTP requests a short drain window, then force-close everything —
 // long-lived WS upgrades would otherwise keep the process alive forever.
+//
+// The drain window MUST stay well under tsx watch's 5s kill grace: in dev,
+// every proxied HMR/MQTT websocket keeps `server.close()` waiting, and with a
+// 5s drain tsx printed "Process didn't exit in 5s. Force killing…" and
+// SIGKILLed us on every watched-file restart. 2s drain + hard exit at 3.5s
+// guarantees a clean exit inside the grace window.
+const DRAIN_MS = 2_000;
+const HARD_EXIT_MS = 3_500;
+
 function shutdown(signal: string): void {
-  console.log(`[gateway] ${signal} received — draining…`);
+  console.log(`[gateway] ${signal} received — draining ${DRAIN_MS / 1000}s…`);
   server.closeIdleConnections?.();
   const forceTimer = setTimeout(() => {
     server.closeAllConnections?.();
-  }, 5_000);
+  }, DRAIN_MS);
+  const hardExit = setTimeout(() => {
+    console.log("[gateway] drain elapsed — exiting");
+    process.exit(0);
+  }, HARD_EXIT_MS);
   forceTimer.unref();
+  hardExit.unref();
   server.close(() => {
+    clearTimeout(forceTimer);
+    clearTimeout(hardExit);
     console.log("[gateway] closed cleanly");
     process.exit(0);
   });
