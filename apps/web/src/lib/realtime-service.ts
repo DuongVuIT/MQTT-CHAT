@@ -102,14 +102,18 @@ export class RealtimeService {
         }),
         qos: 1,
       },
-      onStatus: (status) => this.emitState(toConnectionState(status)),
+      onStatus: (status) => {
+        if (this.core === core) this.emitState(toConnectionState(status));
+      },
       onConnect: () => {
+        if (this.core !== core) return;
         // Announce presence after every (re)connect.
         void core.setPresence(true).catch(() => {
           /* transient — next reconnect retries */
         });
       },
       onEvent: (event: RealtimeEvent) => {
+        if (this.core !== core) return;
         try {
           // Core emits parsed JSON; contracts validation happens here so both
           // strictness and error handling stay in one place per platform shell.
@@ -187,9 +191,14 @@ export class RealtimeService {
       await core.setPresence(false).catch(() => {});
     }
     await core.disconnect();
-    this.core = null;
-    this.identity = null;
-    this.emitState("disconnected");
+    // A newer connect may have installed another core while this async
+    // teardown awaited its presence publish/socket close. Never let the stale
+    // teardown null or emit state for the new identity's live session.
+    if (this.core === core) {
+      this.core = null;
+      this.identity = null;
+      this.emitState("disconnected");
+    }
   }
 
   private emitState(state: ConnectionState): void {

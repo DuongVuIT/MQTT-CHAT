@@ -303,6 +303,12 @@ function safeUuid(): string {
   }
 }
 
+/** Broker identity must be unique per physical connection. Date.now alone
+ * can collide when React StrictMode creates two sessions in one millisecond. */
+export function brokerClientId(identity: RealtimeIdentity, nonce = safeUuid()): string {
+  return `${identity.userId}:${identity.deviceId}:${nonce}`;
+}
+
 export class ChatRealtimeClient {
   private client: MqttClient | null = null;
   private readonly opts: ChatRealtimeClientOptions;
@@ -332,7 +338,7 @@ export class ChatRealtimeClient {
     // session): EMQX takeover kicks the old connection, its auto-reconnect
     // kicks back — endless presence flap. The logical deviceId stays in the
     // actor envelope; only the broker clientId gains a nonce.
-    const clientId = `${identity.userId}:${identity.deviceId}:${Date.now()}`;
+    const clientId = brokerClientId(identity);
 
     return new Promise((resolve, reject) => {
       const client = mqtt.connect(url, {
