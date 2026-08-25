@@ -80,7 +80,9 @@ async function listConversations(userId: string): Promise<SuiteConversation[]> {
 }
 
 /** Publish receipt.read through the canonical command topic. */
-function makeReceiptPublisher(client: ChatRealtimeClient): (conversationId: string, seq: number) => Promise<void> {
+function makeReceiptPublisher(
+  client: ChatRealtimeClient,
+): (conversationId: string, seq: number) => Promise<void> {
   return async (conversationId, seq) => {
     // markRead is the canonical client API (wraps receipt.read command).
     await client.markRead(conversationId, seq);
@@ -109,7 +111,11 @@ async function main(): Promise<void> {
     }),
   });
   const conv = ((await convRes.json()) as { conversation: { id: string } }).conversation;
-  check(convRes.ok && Boolean(conv?.id), "DIRECT conversation created", conv?.id ?? String(convRes.status));
+  check(
+    convRes.ok && Boolean(conv?.id),
+    "DIRECT conversation created",
+    conv?.id ?? String(convRes.status),
+  );
   const conversationId = conv.id;
   suiteCleanups.push(() =>
     fetch(`${API}/conversations/${conversationId}?actor=${encodeURIComponent(userA)}`, {
@@ -174,9 +180,15 @@ async function main(): Promise<void> {
 
   const echoDev1 = await waitForEvent(
     bDev1Events,
-    (e) => e.eventType === "receipt.read" && Number((e.data as Record<string, unknown>)?.["lastReadSequence"]) >= seq,
+    (e) =>
+      e.eventType === "receipt.read" &&
+      Number((e.data as Record<string, unknown>)?.["lastReadSequence"]) >= seq,
   );
-  check(echoDev1 !== null, "receipt.read echoed to the READER's device1", echoDev1 ? "received" : "missing");
+  check(
+    echoDev1 !== null,
+    "receipt.read echoed to the READER's device1",
+    echoDev1 ? "received" : "missing",
+  );
 
   const onDev2 = await waitForEvent(
     bDev2Events,
@@ -185,20 +197,33 @@ async function main(): Promise<void> {
       Number((e.data as Record<string, unknown>)?.["lastReadSequence"]) >= seq &&
       (e.data as Record<string, unknown>)?.["userId"] === userB,
   );
-  check(onDev2 !== null, "CROSS-DEVICE: receipt.read reached the reader's device2", onDev2 ? "received" : "MISSING (regression)");
+  check(
+    onDev2 !== null,
+    "CROSS-DEVICE: receipt.read reached the reader's device2",
+    onDev2 ? "received" : "MISSING (regression)",
+  );
 
   const onSender = await waitForEvent(
     senderEvents,
-    (e) => e.eventType === "receipt.read" && (e.data as Record<string, unknown>)?.["userId"] === userB,
+    (e) =>
+      e.eventType === "receipt.read" && (e.data as Record<string, unknown>)?.["userId"] === userB,
   );
-  check(onSender !== null, "sender received receipt.read (✓✓ tick source)", onSender ? "received" : "missing");
+  check(
+    onSender !== null,
+    "sender received receipt.read (✓✓ tick source)",
+    onSender ? "received" : "missing",
+  );
 
   // ---- Persistence via REST bootstrap ------------------------------------
   await sleep(300); // outbox drain window
   const convsForB = await listConversations(userB);
   const mine = convsForB.find((c) => c.id === conversationId);
   const bWatermark = mine?.members?.find((m) => m.userId === userB)?.lastReadSequence ?? -1;
-  check(bWatermark === seq, "REST bootstrap carries advanced watermark (unread=0 derivable)", `lastReadSequence=${bWatermark}`);
+  check(
+    bWatermark === seq,
+    "REST bootstrap carries advanced watermark (unread=0 derivable)",
+    `lastReadSequence=${bWatermark}`,
+  );
 
   // ---- Server-side monotonic guard ---------------------------------------
   const publishStale = makeReceiptPublisher(bDevice2);
@@ -206,8 +231,13 @@ async function main(): Promise<void> {
   await sleep(500);
   const convsAfterStale = await listConversations(userB);
   const afterStale = convsAfterStale.find((c) => c.id === conversationId);
-  const watermarkAfter = afterStale?.members?.find((m) => m.userId === userB)?.lastReadSequence ?? -1;
-  check(watermarkAfter === seq, "stale receipt.read does NOT regress the persisted watermark", `still=${watermarkAfter}`);
+  const watermarkAfter =
+    afterStale?.members?.find((m) => m.userId === userB)?.lastReadSequence ?? -1;
+  check(
+    watermarkAfter === seq,
+    "stale receipt.read does NOT regress the persisted watermark",
+    `still=${watermarkAfter}`,
+  );
 
   await runSuiteCleanups();
   if (failed) {

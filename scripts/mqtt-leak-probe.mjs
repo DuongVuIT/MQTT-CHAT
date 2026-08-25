@@ -63,7 +63,11 @@ try {
   await sleep(3500);
 
   const baseline = forUser(mqttClients(), "duong:").filter((c) => !baselineIds.includes(c.id));
-  check(baseline.length === 1, "exactly ONE NEW broker client for duong (probe's own)", JSON.stringify(baseline));
+  check(
+    baseline.length === 1,
+    "exactly ONE NEW broker client for duong (probe's own)",
+    JSON.stringify(baseline),
+  );
   const baseSubs = baseline[0]?.subs ?? -1;
   check(baseSubs >= 2, "global + user topic subscribed", `subs=${baseSubs}`);
 
@@ -97,7 +101,9 @@ try {
     document.querySelector('button[data-user-id="alice"]')?.click();
   });
   await sleep(3500);
-  const midClients = mqttClients().filter((c) => c.id.startsWith("duong:") && !baselineIds.includes(c.id));
+  const midClients = mqttClients().filter(
+    (c) => c.id.startsWith("duong:") && !baselineIds.includes(c.id),
+  );
   check(
     midClients.length === 0 || midClients.every((c) => !c.connected),
     "duong client GONE after identity switch",

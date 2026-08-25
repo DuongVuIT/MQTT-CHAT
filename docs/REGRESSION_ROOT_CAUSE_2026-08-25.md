@@ -161,7 +161,7 @@ no regress; missing-members defense),
 no path to learn about ANY receipt event.
 
 **Evidence.** Event switch in `apps/mobile/src/hooks/useChatSession.ts`
-handled conversation.*, message.*, reaction.*, typing.*, presence.* — no
+handled conversation._, message._, reaction._, typing._, presence.* — no
 `receipt.read`/`receipt.delivered` case existed (compare web
 `apps/web/src/app/chat/page.tsx:451`). The subscription was fine
 (`ChatRealtimeClient` subscribes `userEventsWildcardTopic(identity.userId)`
@@ -183,12 +183,12 @@ plus the E2E suite (RC-02).
 
 **Evidence.**
 
-| | Web `packages/ui/src/components/Avatar.tsx` | Mobile `apps/mobile/src/theme/tokens.ts` |
-|---|---|---|
-| hash | `hash*31+c` unsigned | djb2 signed `(h<<5)+h+c\|0` |
-| key | display name | display title (DM rows) / conv id / userId |
-| palette | tailwind classes (6) | `AVATAR_PAIRS` hexes (8) |
-| initials | initials of name words | `title.slice(0,1..2)` |
+|          | Web `packages/ui/src/components/Avatar.tsx` | Mobile `apps/mobile/src/theme/tokens.ts`   |
+| -------- | ------------------------------------------- | ------------------------------------------ |
+| hash     | `hash*31+c` unsigned                        | djb2 signed `(h<<5)+h+c\|0`                |
+| key      | display name                                | display title (DM rows) / conv id / userId |
+| palette  | tailwind classes (6)                        | `AVATAR_PAIRS` hexes (8)                   |
+| initials | initials of name words                      | `title.slice(0,1..2)`                      |
 
 Mobile also keyed DM avatars by peer display title
 (`ConversationListScreen`) and chat headers by title (`ChatScreen:593`) —
