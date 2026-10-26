@@ -1,6 +1,6 @@
 {
   "name": "@mqtt-chat/bot-rules",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Declarative, JSON-defined chat bot rules: Zod-validated triggers, conditions and actions with a safe condition engine (no eval).",
   "license": "MIT",
   "author": "Vũ Đại Dương <duongvuit.26@gmail.com>",
@@ -62,7 +62,7 @@
     "prepublishOnly": "pnpm test && pnpm build"
   },
   "dependencies": {
-    "zod": "^3.24.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

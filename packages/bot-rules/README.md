@@ -7,12 +7,12 @@ It was extracted from [MQTT-CHAT](https://github.com/DuongVuIT/MQTT-CHAT), where
 ## Install
 
 ```bash
-npm install @mqtt-chat/bot-rules zod
+npm install @mqtt-chat/bot-rules
 # or
-pnpm add @mqtt-chat/bot-rules zod
+pnpm add @mqtt-chat/bot-rules
 ```
 
-Works with both ESM (`import`) and CommonJS (`require`). Node 18+.
+Works with both ESM (`import`) and CommonJS (`require`). Node 18+. Uses Zod 4 (installed automatically).
 
 ## Quick example
 

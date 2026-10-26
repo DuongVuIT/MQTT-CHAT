@@ -65,8 +65,8 @@ export const actionSchema = z.object({
   runAtMs: z.number().int().positive().optional(),
   userArgIndex: z.number().int().nonnegative().optional(),
   eventType: z.string().min(1).optional(),
-  payload: z.record(z.unknown()).optional(),
-  url: z.string().url().optional(),
+  payload: z.record(z.string(), z.unknown()).optional(),
+  url: z.url().optional(),
   method: z.enum(["GET", "POST", "PUT", "PATCH"]).optional(),
   timeoutMs: z.number().int().positive().max(30_000).optional(),
 });
@@ -92,6 +92,8 @@ export function safeParseRuleDefinition(
   if (result.success) return { success: true, data: result.data };
   return {
     success: false,
-    error: result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+    error: result.error.issues
+      .map((i) => `${i.path.map(String).join(".")}: ${i.message}`)
+      .join("; "),
   };
 }
