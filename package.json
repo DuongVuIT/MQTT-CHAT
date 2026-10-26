@@ -1,6 +1,12 @@
 {
   "name": "mqtt-chat",
   "version": "0.1.0",
+  "description": "Realtime chat platform on MQTT (EMQX): server-authoritative messaging with a transactional outbox, rule-based bot engine, presence, media and React Native client.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DuongVuIT/MQTT-CHAT.git"
+  },
   "private": true,
   "packageManager": "pnpm@10.20.0",
   "engines": {

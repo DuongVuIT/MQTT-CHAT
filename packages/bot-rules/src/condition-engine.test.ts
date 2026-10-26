@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateCondition, evaluateConditions } from "./condition-engine";
+import { evaluateCondition, evaluateConditions, resolvePath } from "./condition-engine";
 import { ruleDefinitionSchema } from "./schema";
 
 describe("evaluateCondition", () => {
@@ -139,5 +139,22 @@ describe("ruleDefinitionSchema validation", () => {
         actions: [{ type: "run_shell_command", command: "rm -rf /" }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("resolvePath", () => {
+  it("resolves nested own properties", () => {
+    expect(resolvePath({ data: { content: "hi" } }, "data.content")).toBe("hi");
+    expect(resolvePath({ tags: ["a", "b"] }, "tags.1")).toBe("b");
+    expect(resolvePath({ data: {} }, "data.missing.deep")).toBeUndefined();
+  });
+
+  it("never exposes inherited or prototype members", () => {
+    const context = { data: { content: "hi" } };
+    expect(resolvePath(context, "constructor")).toBeUndefined();
+    expect(resolvePath(context, "data.__proto__")).toBeUndefined();
+    expect(resolvePath(context, "data.toString")).toBeUndefined();
+    expect(resolvePath(context, "data.constructor.prototype")).toBeUndefined();
+    expect(evaluateCondition({ field: "constructor", operator: "exists" }, context)).toBe(false);
   });
 });

@@ -6,13 +6,21 @@ import type { Condition } from "./schema";
  * No arbitrary code execution — only declarative operators.
  */
 
-/** Resolve a dot-path like "data.content" or "state.flow" against a nested object. */
+const FORBIDDEN_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+
+/**
+ * Resolve a dot-path like "data.content" or "state.flow" against a nested object.
+ * Only own properties are read, so rule authors cannot reach inherited members
+ * such as `constructor` or `__proto__`.
+ */
 export function resolvePath(context: Record<string, unknown>, path: string): unknown {
   const segments = path.split(".");
   let current: unknown = context;
   for (const segment of segments) {
     if (current === null || current === undefined) return undefined;
     if (typeof current !== "object") return undefined;
+    if (FORBIDDEN_SEGMENTS.has(segment)) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(current, segment)) return undefined;
     current = (current as Record<string, unknown>)[segment];
   }
   return current;

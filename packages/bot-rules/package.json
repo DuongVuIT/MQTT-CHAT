@@ -1,21 +1,72 @@
 {
   "name": "@mqtt-chat/bot-rules",
   "version": "0.1.0",
-  "private": true,
+  "description": "Declarative, JSON-defined chat bot rules: Zod-validated triggers, conditions and actions with a safe condition engine (no eval).",
+  "license": "MIT",
+  "author": "Vũ Đại Dương <duongvuit.26@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DuongVuIT/MQTT-CHAT.git",
+    "directory": "packages/bot-rules"
+  },
+  "homepage": "https://github.com/DuongVuIT/MQTT-CHAT/tree/main/packages/bot-rules#readme",
+  "bugs": "https://github.com/DuongVuIT/MQTT-CHAT/issues",
+  "keywords": [
+    "chatbot",
+    "bot",
+    "rules-engine",
+    "rule-engine",
+    "conditions",
+    "zod",
+    "json",
+    "mqtt",
+    "chat",
+    "automation"
+  ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.js"
+        },
+        "require": {
+          "types": "./dist/index.d.cts",
+          "default": "./dist/index.cjs"
+        }
+      }
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
+    "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist .turbo"
+    "clean": "rm -rf dist .turbo",
+    "prepublishOnly": "pnpm test && pnpm build"
   },
   "dependencies": {
     "zod": "^3.24.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "tsup": "8.5.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"
   }

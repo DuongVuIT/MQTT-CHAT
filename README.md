@@ -1,5 +1,7 @@
 # MQTT Chat Monorepo + Bot Automation Platform
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Realtime chat demo platform built on MQTT (EMQX) with a **single public
 origin**, server-authoritative architecture, bot automation engine,
 notifications, media uploads and an admin dashboard.
@@ -106,19 +108,19 @@ adapter. Bots never bypass chat-worker. See `docs/architecture.md`.
 
 ## Packages
 
-| Package                   | Purpose                                                                   |
-| ------------------------- | ------------------------------------------------------------------------- |
-| `packages/mqtt-contracts` | Topics (env-fencable namespace), command/event schemas, envelope (Zod)    |
-| `packages/realtime-core`  | Platform-agnostic browser/RN MQTT adapter — the only client mqtt importer |
-| `packages/mqtt`           | Server-side MQTT client factory, reconnect, QoS constants                 |
-| `packages/database`       | Prisma schema/client, migrations, seed                                    |
-| `packages/redis`          | Client factory, key builders, presence/typing/unread/bot-state repos      |
-| `packages/storage`        | ObjectStorage abstraction + media key contract (MinIO/S3-compatible)      |
-| `packages/bot-sdk`        | Bot framework: `bot.on/command`, context, parser                          |
-| `packages/bot-rules`      | Rule schema, condition engine (12 operators), action validation           |
-| `packages/config`         | Env parsing + validation at startup                                       |
-| `packages/logger`         | Structured logging with correlation IDs                                   |
-| `packages/ui`             | Shared design system components                                           |
+| Package                   | Purpose                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/mqtt-contracts` | Topics (env-fencable namespace), command/event schemas, envelope (Zod)                                                                      |
+| `packages/realtime-core`  | Platform-agnostic browser/RN MQTT adapter — the only client mqtt importer                                                                   |
+| `packages/mqtt`           | Server-side MQTT client factory, reconnect, QoS constants                                                                                   |
+| `packages/database`       | Prisma schema/client, migrations, seed                                                                                                      |
+| `packages/redis`          | Client factory, key builders, presence/typing/unread/bot-state repos                                                                        |
+| `packages/storage`        | ObjectStorage abstraction + media key contract (MinIO/S3-compatible)                                                                        |
+| `packages/bot-sdk`        | Bot framework: `bot.on/command`, context, parser                                                                                            |
+| `packages/bot-rules`      | Rule schema, condition engine (12 operators), action validation. Published to npm as [`@mqtt-chat/bot-rules`](packages/bot-rules/README.md) |
+| `packages/config`         | Env parsing + validation at startup                                                                                                         |
+| `packages/logger`         | Structured logging with correlation IDs                                                                                                     |
+| `packages/ui`             | Shared design system components                                                                                                             |
 
 ## Try the Demo Flows
 
@@ -186,3 +188,15 @@ while any mandatory P0 item is not VERIFIED.
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm format:check
 ```
+
+## Reusable Packages
+
+`@mqtt-chat/bot-rules` can be used on its own, outside this monorepo: JSON-defined bot rules validated with Zod and evaluated by a safe condition engine (no `eval`). See [packages/bot-rules/README.md](packages/bot-rules/README.md).
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `pnpm validate` before opening a PR.
+
+## License
+
+[MIT](LICENSE) © 2026 Vũ Đại Dương
