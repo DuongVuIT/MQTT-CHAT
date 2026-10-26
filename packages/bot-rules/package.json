@@ -57,7 +57,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --root ../.. packages/bot-rules",
     "clean": "rm -rf dist .turbo",
     "prepublishOnly": "pnpm test && pnpm build"
   },
